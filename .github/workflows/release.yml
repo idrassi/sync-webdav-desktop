@@ -1,0 +1,140 @@
+name: Publish release
+
+on:
+  push:
+    tags:
+      - '*'
+
+# Builds and tests never receive a repository-write token.
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Validate, test and build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      tag: ${{ steps.release.outputs.tag }}
+      commit: ${{ steps.source.outputs.commit }}
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Check out the tagged source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Validate tag and prepare changelog-based notes
+        id: release
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          /usr/bin/python3 packaging/release_notes.py \
+            --tag "$RELEASE_TAG" \
+            --output dist/release-notes.md \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Install test and packaging prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            python3 python3-gi gir1.2-gtk-3.0 gir1.2-ayatanaappindicator3-0.1 \
+            desktop-file-utils rclone fuse3 util-linux kmod pkexec
+
+      - name: Run unit tests
+        run: /usr/bin/python3 -m unittest discover -s tests -v
+
+      - name: Record tested commit and reproducible build timestamp
+        id: source
+        run: |
+          echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)" >> "$GITHUB_ENV"
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Build source archive and Debian package
+        run: /usr/bin/python3 packaging/build.py
+
+      - name: Verify distributions and desktop entries
+        run: /usr/bin/python3 packaging/check_distribution.py
+
+      - name: Generate asset checksums
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          cd dist
+          sha256sum \
+            "sync-webdav-desktop_${RELEASE_VERSION}_all.deb" \
+            "sync-webdav-desktop-${RELEASE_VERSION}.tar.gz" > SHA256SUMS
+
+      - name: Preserve validated release assets
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-${{ steps.release.outputs.version }}
+          path: |
+            dist/sync-webdav-desktop_${{ steps.release.outputs.version }}_all.deb
+            dist/sync-webdav-desktop-${{ steps.release.outputs.version }}.tar.gz
+            dist/SHA256SUMS
+            dist/release-notes.md
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish GitHub release
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      # No source checkout or repository scripts run in the write-enabled job.
+      - name: Download validated assets
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-${{ needs.build.outputs.version }}
+          path: dist
+
+      - name: Create release and attach packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.build.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.build.outputs.commit }}
+        run: |
+          # --verify-tag alone only checks existence. Also compare the peeled
+          # tag commit so a moved tag cannot publish a different tested tree.
+          remote_object=$(gh api "repos/${GH_REPO}/git/ref/tags/${RELEASE_TAG}" \
+            --jq '[.object.type, .object.sha] | @tsv')
+          read -r object_type object_sha <<< "$remote_object"
+          for _ in {1..10}; do
+            if [[ "$object_type" == "commit" ]]; then
+              break
+            fi
+            if [[ "$object_type" != "tag" || ! "$object_sha" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "Remote tag does not resolve to a commit."
+              exit 1
+            fi
+            remote_object=$(gh api "repos/${GH_REPO}/git/tags/${object_sha}" \
+              --jq '[.object.type, .object.sha] | @tsv')
+            read -r object_type object_sha <<< "$remote_object"
+          done
+          if [[ "$object_type" != "commit" || "$object_sha" != "$RELEASE_COMMIT" ]]; then
+            echo "Tag no longer points to the tested commit; refusing publication."
+            exit 1
+          fi
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "A release for $RELEASE_TAG already exists; published assets will not be overwritten."
+            exit 1
+          fi
+          gh release create "$RELEASE_TAG" \
+            --verify-tag \
+            --title "Sync WebDAV Desktop ${RELEASE_VERSION}" \
+            --notes-file dist/release-notes.md \
+            "dist/sync-webdav-desktop_${RELEASE_VERSION}_all.deb" \
+            "dist/sync-webdav-desktop-${RELEASE_VERSION}.tar.gz" \
+            dist/SHA256SUMS

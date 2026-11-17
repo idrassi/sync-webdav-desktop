@@ -19,8 +19,12 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.dont_write_bytecode = True
+# Read release metadata from source so future tags do not need a version bump
+# in this checker. The helper validates literals without importing the GUI.
+from release_notes import read_version
+
 PACKAGE = "sync-webdav-desktop"
-VERSION = "1.0.0"
+VERSION = read_version(ROOT / "install.py")
 APP_ID = "io.github.vera.SyncWebDAVTray"
 PREFIX = f"{PACKAGE}-{VERSION}"
 ARTIFACTS = (f"{PREFIX}.tar.gz", f"{PACKAGE}_{VERSION}_all.deb")
@@ -225,7 +229,7 @@ def main() -> int:
         controls, _ = tar_files(ar["control.tar.gz"])
         payload, payload_members = tar_files(ar["data.tar.gz"])
         control = controls["control"].decode()
-        for text in ("Package: sync-webdav-desktop\n", "Version: 1.0.0\n", "Architecture: all\n",
+        for text in ("Package: sync-webdav-desktop\n", f"Version: {VERSION}\n", "Architecture: all\n",
                      "python3 (>= 3.10)", "gir1.2-ayatanaappindicator3-0.1", "util-linux, xdg-utils, pkexec\n"):
             check(text in control, f"Missing Debian metadata/dependency: {text}")
         runtime = {f"usr/share/{PACKAGE}/{name}" for name in names

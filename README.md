@@ -276,6 +276,15 @@ and reboot compatibility should be verified on each target environment using
 [the acceptance checklist](docs/ACCEPTANCE_TESTS.md). Availability of a source or
 Debian package is not a claim of validation on every Linux distribution.
 
+## Automated releases
+
+Pushing a version tag such as `v1.0.0` runs GitHub Actions tests and packaging
+verification, then publishes a GitHub release with the `.deb`, source archive,
+checksums, and changes extracted from the matching `docs/CHANGELOG.md` entry.
+The tag must match `VERSION` in both `settings.py` and `install.py`. No personal
+access token is required. See [the release guide](docs/RELEASING.md) for the
+workflow, tagging steps, and failure behavior.
+
 ## References
 
 Implemented from the vendor's documented instructions:
