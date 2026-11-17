@@ -1,0 +1,14 @@
+#!/bin/sh
+set -e
+# Remove/purge only refresh desktop caches; never touch home directories or services.
+case "$1" in
+    remove|purge)
+        if command -v update-desktop-database >/dev/null 2>&1; then
+            update-desktop-database /usr/share/applications || true
+        fi
+        if command -v gtk-update-icon-cache >/dev/null 2>&1 && [ -f /usr/share/icons/hicolor/index.theme ]; then
+            gtk-update-icon-cache -f -t /usr/share/icons/hicolor || true
+        fi
+        ;;
+esac
+exit 0

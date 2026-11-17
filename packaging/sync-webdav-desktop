@@ -1,0 +1,3 @@
+#!/bin/sh
+# Use the distribution's Python, not a virtual environment without system GI.
+exec /usr/bin/python3 /usr/share/sync-webdav-desktop/app.py "$@"

@@ -1,0 +1,29 @@
+# Build outputs, environments, and Python/tool caches
+/dist/
+/build/
+*.egg-info/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+.coverage
+htmlcov/
+
+# Local credentials, vendor downloads, and test/runtime state
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+credentials/
+.sync-webdav/
+rclone.conf
+/runtime/
+/test-runtime/
+/tests/runtime/
+/tests/fixtures/private/
+*.log

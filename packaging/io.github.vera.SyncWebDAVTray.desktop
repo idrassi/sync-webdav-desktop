@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Sync WebDAV Desktop
+Comment=Independent, unofficial desktop app for Sync.com WebDAV
+Exec=/usr/bin/sync-webdav-desktop
+Icon=io.github.vera.SyncWebDAVTray
+Terminal=false
+Categories=Network;
+Keywords=Sync;WebDAV;rclone;mount;cloud;
+StartupNotify=false

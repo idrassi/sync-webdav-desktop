@@ -1,0 +1,15 @@
+Package: sync-webdav-desktop
+Version: @VERSION@
+Section: net
+Priority: optional
+Architecture: all
+Maintainer: Mounir IDRASSI <mounir.idrassi@amcrypto.jp>
+Homepage: https://github.com/idrassi/sync-webdav-desktop
+Installed-Size: @INSTALLED_SIZE@
+Depends: python3 (>= 3.10), python3-gi, gir1.2-gtk-3.0, gir1.2-ayatanaappindicator3-0.1, desktop-file-utils, systemd, util-linux, xdg-utils, pkexec
+Recommends: curl, rclone, fuse3, kmod
+Description: independent, unofficial Sync.com WebDAV desktop companion
+ GTK 3 and Ayatana AppIndicator desktop application for Sync.com WebDAV
+ and an rclone-mounted drive. Uses per-user services and browser sign-in.
+ The proprietary Sync WebDAV binary is not included. Optional runtime setup
+ obtains the vendor installer separately, with explicit user approval.
