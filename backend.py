@@ -10,11 +10,10 @@ from pathlib import Path
 import re
 import socket
 import subprocess
-import tempfile
 import time
 from dataclasses import asdict, dataclass
-from typing import Callable
-import uuid
+
+from desktop_entry import desktop_quote
 
 APP_ID = "io.github.vera.SyncWebDAVTray"
 SERVICES = ("sync-webdav.service", "sync-rclone.service")
@@ -340,16 +339,6 @@ def collect_snapshot(settings=None) -> Snapshot:
         return replace(snapshot, session_evidence='Session / keep-alive evidence unavailable; check private history permissions.')
 
 
-def verify_mount(attempts: int = 5, delay: float = 2) -> Snapshot:
-    for attempt in range(attempts):
-        snapshot = collect_snapshot()
-        if snapshot.state == "online":
-            return snapshot
-        if attempt + 1 < attempts:
-            time.sleep(delay)
-    raise OperationError(snapshot.title + ". Check the status window's diagnostics.")
-
-
 def restart_services(settings=None, allow_lazy: bool = False) -> Snapshot:
     from settings import load_settings
     from setup_engine import restart
@@ -358,88 +347,15 @@ def restart_services(settings=None, allow_lazy: bool = False) -> Snapshot:
     return restart(settings, threading.Event(), lambda _: None, allow_lazy)
 
 
-def sign_in_restore(login: Callable | None = None) -> Snapshot:
-    """Run only in a terminal: login inherits its TTY, not any captured pipe."""
-    if not WEBDAV_BIN.is_file() or not os.access(WEBDAV_BIN, os.X_OK):
-        raise OperationError(f"Sync WebDAV is not installed at {WEBDAV_BIN}.")
-    with operation_lock():
-        print("Stopping the mount and WebDAV retry loop…", flush=True)
-        change_services("stop")
-        from settings import load_settings
-        from mount_safety import cleanup_stale_mount
-        from setup_engine import enable_failure_logging
-        import threading
-        settings = load_settings()
-        cleanup_stale_mount(settings, progress=print)
-        enable_failure_logging(settings, threading.Event(), print)
-        print("Sign in in the browser opened by Sync. Do not share your password with the tray app.\n", flush=True)
-        if login is None:
-            child = subprocess.Popen([str(WEBDAV_BIN), "login", "--profile", settings.profile])
-            try:
-                code = child.wait()
-            except BaseException:
-                # Do not release the recovery lock while a cancelled login
-                # could still be running and modifying the saved profile.
-                child.terminate()
-                try:
-                    child.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    child.kill()
-                    child.wait()
-                raise
-        else:
-            code = login()
-        if code:
-            raise OperationError("Sign-in did not complete. Services remain stopped; you can retry Sign in & restore.")
-        print("\nSign-in completed. Starting WebDAV and mounting Sync…", flush=True)
-        change_services("start")
-        return verify_mount()
-
-
-def result_path(operation_id: str) -> Path:
-    if str(uuid.UUID(operation_id)) != operation_id:
-        raise ValueError("Invalid recovery operation ID")
-    return private_runtime_dir() / f"recovery-{operation_id}.json"
-
-
-def write_result(operation_id: str, state: str, message: str) -> None:
-    target = result_path(operation_id)
-    fd, temporary = tempfile.mkstemp(prefix=".result-", dir=target.parent)
-    try:
-        with os.fdopen(fd, "w") as stream:
-            json.dump({"state": state, "message": redact(message)}, stream)
-        os.replace(temporary, target)
-    finally:
-        Path(temporary).unlink(missing_ok=True)
-
-
-def recovery_command(operation_id: str) -> list[str]:
-    helper = ["/usr/bin/python3", str(APP_DIR / "recovery.py"), "--operation-id", operation_id]
-    # Ptyxis is the terminal installed on this Ubuntu desktop. --standalone
-    # provides a process whose lifetime we can track, even with an existing terminal.
-    import shutil
-    if shutil.which("ptyxis"):
-        return [shutil.which("ptyxis"), "--standalone", "--new-window", "--title=Sync WebDAV — Sign in", "--", *helper]
-    if shutil.which("gnome-terminal"):
-        return [shutil.which("gnome-terminal"), "--wait", "--title=Sync WebDAV — Sign in", "--", *helper]
-    if shutil.which("xterm"):
-        return [shutil.which("xterm"), "-T", "Sync WebDAV — Sign in", "-e", *helper]
-    raise OperationError("No supported terminal found. Install Ptyxis, GNOME Terminal, or XTerm.")
-
-
 def config_home() -> Path:
     return Path(os.environ.get("XDG_CONFIG_HOME", str(HOME / ".config")))
 
 
 def desktop_entry(tray: bool = False) -> str:
-    # Desktop Exec quoting differs from shell quoting; escape % as well.
-    program = str(APP_DIR / "app.py").replace("%", "%%")
-    for char in ("\\", '"', "`", "$"):
-        program = program.replace(char, "\\" + char)
-    program = program.replace("\\", "\\\\")
+    program = desktop_quote(str(APP_DIR / "app.py"))
     return ("[Desktop Entry]\nType=Application\nName=Sync WebDAV Desktop\n"
             "Comment=Set up, configure, and restore your Sync.com WebDAV drive\n"
-            f'Exec=/usr/bin/python3 "{program}"' + (" --tray" if tray else "") + "\n"
+            f"Exec=/usr/bin/python3 {program}" + (" --tray" if tray else "") + "\n"
             f"Icon={APP_ID}\nTerminal=false\nCategories=Network;\n"
             "Keywords=Sync;WebDAV;rclone;mount;cloud;\nStartupNotify=false\n"
             + ("X-GNOME-Autostart-Delay=15\n" if tray else ""))
@@ -450,15 +366,10 @@ def autostart_path() -> Path:
 
 
 def set_autostart(enabled: bool) -> None:
+    from settings import atomic_write, reject_symlink_path
     path = autostart_path()
     if enabled:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        fd, temporary = tempfile.mkstemp(prefix=".sync-tray-", dir=path.parent)
-        try:
-            with os.fdopen(fd, "w") as stream:
-                stream.write(desktop_entry(tray=True))
-            os.replace(temporary, path)
-        finally:
-            Path(temporary).unlink(missing_ok=True)
+        atomic_write(path, desktop_entry(tray=True))
     else:
+        reject_symlink_path(path)
         path.unlink(missing_ok=True)

@@ -93,6 +93,7 @@ class Settings:
     configured: bool = False
     keepalive_enabled: bool = True
     keepalive_interval_seconds: int = 60
+    installer_sha256: str = ""
 
     @property
     def config_file(self) -> Path:
@@ -104,7 +105,10 @@ class Settings:
 
     def validate(self) -> Settings:
         safe_text(self.mount_point, "Mount location")
-        path = Path(self.mount_point).expanduser()
+        try:
+            path = Path(self.mount_point).expanduser()
+        except RuntimeError as exc:
+            raise ValueError("Mount location refers to an unknown home directory") from exc
         if ".." in path.parts:
             raise ValueError("Mount location must not contain .. path components")
         if not path.is_absolute() or path == Path("/") or path == HOME:
@@ -121,12 +125,14 @@ class Settings:
             raise ValueError("The mount cannot contain the application's settings directory")
         if any(part.startswith(".") for part in path.relative_to(HOME).parts):
             raise ValueError("Do not mount inside hidden application/configuration directories")
-        if self.content not in {"files", "vault", "folder"}:
+        if self.content not in ("files", "vault", "folder"):
             raise ValueError("Unknown content selection")
         safe_text(self.folder, "Sync folder")
-        if self.content == "folder" and (not self.folder.strip("/") or
-                any(p in {".", ".."} for p in self.folder.split("/"))):
-            raise ValueError("Enter a relative Sync folder path without . or ..")
+        if self.content == "folder":
+            # As in scope, normalize leading/trailing slashes; reject empty
+            # segments in the path actually passed to the vendor.
+            if any(part in {"", ".", ".."} for part in self.folder.strip("/").split("/")):
+                raise ValueError("Enter a relative Sync folder path without empty, . or .. components")
         if type(self.port) is not int or not 1024 <= self.port <= 65535:
             raise ValueError("Choose a local port from 1024 to 65535")
         for name, label in [(self.profile, "Profile"), (self.remote, "Rclone remote")]:
@@ -151,7 +157,10 @@ class Settings:
             raise ValueError("Keep-alive interval must be from 30 to 3600 seconds")
         if self.before_login and not self.start_services:
             raise ValueError("Pre-login startup requires automatic service startup")
-        return replace(self, mount_point=str(path))
+        if not isinstance(self.installer_sha256, str) or (self.installer_sha256 and
+                not re.fullmatch(r"[0-9a-fA-F]{64}", self.installer_sha256)):
+            raise ValueError("Installer SHA-256 must be empty or 64 hexadecimal digits")
+        return replace(self, mount_point=str(path), installer_sha256=self.installer_sha256.lower())
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -201,10 +210,11 @@ def discover_legacy() -> Settings:
 
 
 def load_settings() -> Settings:
-    path = settings_path()
-    if not path.exists():
+    try:
+        source = settings_path().read_text()
+    except FileNotFoundError:
         return discover_legacy()
-    value = json.loads(path.read_text())
+    value = json.loads(source)
     if not isinstance(value, dict):
         raise ValueError("Invalid settings file")
     allowed = Settings.__dataclass_fields__

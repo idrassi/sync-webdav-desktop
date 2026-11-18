@@ -112,7 +112,8 @@ Package equivalents for manual prerequisite installation:
 - `~/.local/bin/sync-webdav-desktop`: forwards arguments to the installed
   `app.py` using `/usr/bin/python3`, with shell-safe path quoting.
 - `$XDG_DATA_HOME/applications/io.github.vera.SyncWebDAVTray.desktop`: the
-  **Sync WebDAV Desktop** launcher, with Desktop Entry-safe absolute paths.
+  **Sync WebDAV Desktop** launcher, which runs the installed script via
+  `/usr/bin/python3` with Desktop Entry-safe path quoting.
 - `$XDG_DATA_HOME/icons/hicolor/scalable/apps/io.github.vera.SyncWebDAVTray.svg`.
 - `$XDG_CONFIG_HOME/autostart/io.github.vera.SyncWebDAVTray.desktop` with `--tray`
   (default config home: `~/.config`).

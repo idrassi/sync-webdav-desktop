@@ -1,7 +1,4 @@
-import contextlib
 from dataclasses import replace
-import importlib.util
-import json
 import os
 from pathlib import Path
 import socket
@@ -10,7 +7,6 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
-import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import backend as b
@@ -90,34 +86,6 @@ class BackendTests(unittest.TestCase):
             self.assertEqual(restart.call_count, 1)
             self.assertFalse(restart.call_args.args[3])
 
-    def test_signin_success_order(self):
-        with tempfile.TemporaryDirectory() as directory:
-            binary = Path(directory) / "sync-webdav"
-            binary.touch(mode=0o700)
-            calls = []
-            def login():
-                calls.append("login")
-                return 0
-            with patch.object(b, "WEBDAV_BIN", binary), \
-                 patch.object(b, "operation_lock", contextlib.nullcontext), \
-                 patch.object(b, "change_services", side_effect=lambda action: calls.append(action)), \
-                 patch.object(b, "verify_mount", return_value="ok"), \
-                 patch("mount_safety.cleanup_stale_mount"), patch("setup_engine.enable_failure_logging"):
-                self.assertEqual(b.sign_in_restore(login=login), "ok")
-            self.assertEqual(calls, ["stop", "login", "start"])
-
-    def test_signin_cancel_does_not_start(self):
-        with tempfile.TemporaryDirectory() as directory:
-            binary = Path(directory) / "sync-webdav"
-            binary.touch(mode=0o700)
-            with patch.object(b, "WEBDAV_BIN", binary), \
-                 patch.object(b, "operation_lock", contextlib.nullcontext), \
-                 patch.object(b, "change_services") as change, \
-                 patch("mount_safety.cleanup_stale_mount"), patch("setup_engine.enable_failure_logging"):
-                with self.assertRaises(b.OperationError):
-                    b.sign_in_restore(login=lambda: 1)
-                change.assert_called_once_with("stop")
-
     def test_live_snapshot_normalizes_rclone_root_source(self):
         systemd = ("Id=sync-webdav.service\nActiveState=active\nSubState=running\nLoadState=loaded\n\n"
                    "Id=sync-rclone.service\nActiveState=active\nSubState=running\nLoadState=loaded\n")
@@ -158,26 +126,7 @@ class BackendTests(unittest.TestCase):
                 self.assertEqual(snapshot.as_dict()["http_timed_out"], timed_out)
                 self.assertEqual(snapshot.webdav_delayed, timed_out)
 
-    def test_interrupted_login_child_is_stopped_before_unlock(self):
-        with tempfile.TemporaryDirectory() as directory:
-            binary = Path(directory) / "sync-webdav"
-            binary.touch(mode=0o700)
-            with patch.object(b, "WEBDAV_BIN", binary), \
-                 patch.object(b, "operation_lock", contextlib.nullcontext), \
-                 patch.object(b, "change_services") as change, \
-                 patch("subprocess.Popen") as popen, \
-                 patch("mount_safety.cleanup_stale_mount"), patch("setup_engine.enable_failure_logging"):
-                child = popen.return_value
-                child.wait.side_effect = [KeyboardInterrupt(), 0]
-                with self.assertRaises(KeyboardInterrupt):
-                    b.sign_in_restore()
-                child.terminate.assert_called_once()
-                self.assertEqual(child.wait.call_count, 2)
-                change.assert_called_once_with("stop")
-                self.assertEqual(popen.call_args.args[0], [str(binary), "login", "--profile", "default"])
-                self.assertEqual(popen.call_args.kwargs, {})  # Inherits terminal; no pipes.
-
-    def test_runtime_lock_and_private_results(self):
+    def test_runtime_lock_is_private_and_exclusive(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"XDG_RUNTIME_DIR": directory}):
             self.assertFalse(b.operation_busy())
             with b.operation_lock():
@@ -186,14 +135,9 @@ class BackendTests(unittest.TestCase):
                     with b.operation_lock():
                         pass
             self.assertFalse(b.operation_busy())
-            operation = str(uuid.uuid4())
-            b.write_result(operation, "error", "password=secret")
-            path = b.result_path(operation)
-            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
-            self.assertNotIn("secret", path.read_text())
-            self.assertEqual(path.parent.stat().st_mode & 0o777, 0o700)
-            with self.assertRaises(ValueError):
-                b.result_path("../../bad")
+            lock = b.private_runtime_dir() / "recovery.lock"
+            self.assertEqual(lock.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(lock.parent.stat().st_mode & 0o777, 0o700)
 
     def test_autostart_only_changes_own_file(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"XDG_CONFIG_HOME": directory}):
@@ -206,34 +150,10 @@ class BackendTests(unittest.TestCase):
             self.assertFalse(b.autostart_path().exists())
             self.assertEqual(other.read_text(), "keep me")
 
-    def test_terminal_arguments_not_shell_commands(self):
-        operation = str(uuid.uuid4())
-        with patch("shutil.which", side_effect=lambda name: "/usr/bin/ptyxis" if name == "ptyxis" else None):
-            args = b.recovery_command(operation)
-        self.assertIn("--standalone", args)
-        self.assertEqual(args[-1], operation)
-        self.assertNotIn("sh", args)
-        self.assertIn(str(b.APP_DIR / "recovery.py"), args)
-
     def test_subprocess_timeout_is_actionable(self):
         with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("systemctl", 10)):
             with self.assertRaisesRegex(b.OperationError, "timed out"):
                 b.run_command([b.SYSTEMCTL])
-
-    def test_recovery_helper_with_mocked_services(self):
-        spec = importlib.util.spec_from_file_location("recovery", b.APP_DIR / "recovery.py")
-        helper = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(helper)
-        operation = str(uuid.uuid4())
-        with tempfile.TemporaryDirectory() as directory, \
-             patch.dict(os.environ, {"XDG_RUNTIME_DIR": directory}), \
-             patch.object(sys, "argv", ["recovery.py", "--operation-id", operation]), \
-             patch.object(helper, "sign_in_restore", return_value=type("Status", (), {"title": "Connected"})()), \
-             patch("builtins.input", return_value=""):
-            self.assertEqual(helper.main(), 0)
-            result = json.loads(b.result_path(operation).read_text())
-            self.assertEqual(result["state"], "success")
-
 
 if __name__ == "__main__":
     unittest.main()

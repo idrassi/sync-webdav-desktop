@@ -19,6 +19,7 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.dont_write_bytecode = True
+sys.path.insert(0, str(ROOT))
 # Read release metadata from source so future tags do not need a version bump
 # in this checker. The helper validates literals without importing the GUI.
 from release_notes import read_version
@@ -140,7 +141,9 @@ def check_source_install(temp: Path) -> None:
               "Shell launcher path quoting is unsafe")
         exec_line = next(line[5:] for line in desktop.read_text().splitlines() if line.startswith("Exec="))
         # First undo the Desktop Entry string-value escapes, then Exec quoting/field codes.
-        value = exec_line.replace("\\\\", "\\")
+        python, _, argument = exec_line.partition(" ")
+        check(python == "/usr/bin/python3", "Expected a fixed executable before field-code expansion")
+        value = argument.replace("\\\\", "\\")
         check(value.startswith('"') and value.endswith('"'), "Desktop Exec path is not quoted")
         argument = value[1:-1]
         decoded = []
@@ -154,7 +157,7 @@ def check_source_install(temp: Path) -> None:
                 char = argument[position]
             decoded.append(char)
             position += 1
-        check("".join(decoded).replace("%%", "%") == str(launcher),
+        check("".join(decoded).replace("%%", "%") == str(application / "app.py"),
               "Desktop Exec path quoting is unsafe")
         check(str(app_source) not in wrapper, "Launcher still references the source directory")
         shutil.rmtree(app_source)
@@ -196,7 +199,7 @@ def main() -> int:
         source, members = tar_files((first / ARTIFACTS[0]).read_bytes())
         names = {name[len(PREFIX) + 1:] for name in source}
         check(all(name.startswith(PREFIX + "/") for name in source), "Source archive is not portable/contained")
-        check({"app.py", "backend.py", "recovery.py", "install.py", "scripts/bootstrap.py", "LICENSE",
+        check({"app.py", "backend.py", "desktop_entry.py", "install.py", "scripts/bootstrap.py", "LICENSE",
                "docs/DISTRIBUTION.md", "packaging/build.py"} <= names, "Missing source release inputs")
         check(not any(part in {".git", "__pycache__", "dist", "runtime", "test-runtime", ".env"}
                       for name in names for part in Path(name).parts), "Excluded runtime/cache paths included")

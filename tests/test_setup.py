@@ -12,6 +12,7 @@ import tempfile
 import threading
 import unittest
 from unittest.mock import patch
+import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import authentication as auth
@@ -66,8 +67,17 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(replace(self.config, content='vault').scope, 'vault/')
         self.assertEqual(replace(self.config, content='folder', folder='Documents/A').scope, 'Documents/A/')
         self.assertNotEqual(self.config.config_file, replace(self.config, profile='another').config_file)
-        with self.assertRaises(ValueError):
-            replace(self.config, content='folder', folder='../bad').validate()
+        self.assertEqual(replace(self.config, content='folder', folder='/Documents/A/').validate().scope,
+                         'Documents/A/')
+        for folder in ('../bad', '', '/', 'a//b', 'a/./b'):
+            with self.subTest(folder=folder), self.assertRaisesRegex(ValueError, 'relative Sync folder'):
+                replace(self.config, content='folder', folder=folder).validate()
+
+    def test_installer_pin_validation(self):
+        self.assertEqual(replace(self.config, installer_sha256='AB' * 32).validate().installer_sha256, 'ab' * 32)
+        for pin in (42, 'not-a-hash', 'z' * 64):
+            with self.subTest(pin=pin), self.assertRaisesRegex(ValueError, 'Installer SHA-256'):
+                replace(self.config, installer_sha256=pin).validate()
 
     def test_discover_legacy_does_not_read_secrets(self):
         s.unit_dir().mkdir(parents=True)
@@ -97,6 +107,16 @@ class AuthTests(unittest.TestCase):
         capture = auth.CredentialCapture()
         capture.feed('Password: account-secret\nUsername: not-sync\nPassword: other-secret\n')
         self.assertIsNone(capture.password)
+
+    def test_capture_ignores_unpaired_and_repeated_password_lines(self):
+        issued = []
+        capture = auth.CredentialCapture(issued.append)
+        capture.feed('Username: sync\nPassword: issued\nPassword: unrelated\n')
+        capture.feed('Username: sync\nPassword: issued\n')
+        self.assertEqual(issued, ['issued'])
+        self.assertEqual(capture.password, 'issued')
+        capture.feed('Username: sync\nPassword: replacement\n')
+        self.assertEqual(issued, ['issued', 'replacement'])
 
     def test_browser_pipe_handoff_and_no_output_logging(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -181,6 +201,27 @@ class EngineTests(unittest.TestCase):
         self.assertNotIn('/bin/sh -c', rclone)
         self.assertNotIn('password', webdav.lower())
 
+    def test_installer_pin_checked_before_execution(self):
+        script = b'#!/bin/sh\nexit 0\n'
+        self.config.config_file.parent.mkdir(parents=True)
+
+        def run(command, *args, **kwargs):
+            if command[0] == '/usr/bin/curl':
+                self.assertEqual(command[1], '--disable')  # Do not load .curlrc.
+                Path(command[command.index('--output') + 1]).write_bytes(script)
+
+        for pin, accepted in [('0' * 64, False), (hashlib.sha256(script).hexdigest(), True), ('', True)]:
+            with self.subTest(pin=pin), patch.object(engine, 'run', side_effect=run) as mock_run:
+                config = replace(self.config, installer_sha256=pin)
+                if accepted:
+                    engine.install_server(config, self.cancel, self.messages.append, update=True)
+                    self.assertEqual(mock_run.call_args_list[1].args[0][0], '/bin/sh')
+                    self.assertEqual(mock_run.call_args_list[2].args[0], [str(engine.WEBDAV_BIN), '--version'])
+                else:
+                    with self.assertRaisesRegex(backend.OperationError, 'SHA-256 pin'):
+                        engine.install_server(config, self.cancel, self.messages.append, update=True)
+                    mock_run.assert_called_once()
+
     def test_distro_commands_fixed_and_documented(self):
         self.assertEqual(engine.package_commands('debian')[0], ['/usr/bin/apt-get', 'update'])
         self.assertIn('-Syu', engine.package_commands('arch')[0])
@@ -230,6 +271,34 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(transaction.directory.stat().st_mode & 0o777, 0o700)
         for file in transaction.directory.iterdir(): self.assertEqual(file.stat().st_mode & 0o777, 0o600)
 
+    def test_failed_setup_preserves_concurrent_desktop_changes(self):
+        report = engine.Preflight('debian', (), (), (), True, False)
+        paths = [self.home / '.config/gtk-3.0/bookmarks', backend.autostart_path()]
+        for original in (None, 'old entry\n'):
+            with self.subTest(original=original):
+                def login(*args, **kwargs):
+                    for path in paths:
+                        engine.atomic_write(path, 'new user entry\n')
+                    raise auth.AuthenticationError('Sign-in failed')
+
+                for path in paths:
+                    if original is None:
+                        path.unlink(missing_ok=True)
+                    else:
+                        engine.atomic_write(path, original)
+                with patch.object(engine, 'preflight', return_value=report), \
+                     patch.object(engine, 'operation_lock', contextlib.nullcontext), \
+                     patch.object(engine, 'install_requirements'), patch.object(engine, 'install_server'), \
+                     patch.object(engine, 'ensure_port_free'), patch.object(engine, 'browser_login', side_effect=login), \
+                     patch.object(engine, 'run_command', return_value=subprocess.CompletedProcess([], 0, '', '')) as run, \
+                     patch('mount_safety.cleanup_stale_mount'):
+                    with self.assertRaisesRegex(auth.AuthenticationError, 'Sign-in failed'):
+                        engine.connect(self.config, self.cancel, self.messages.append)
+                for path in paths:
+                    self.assertEqual(path.read_text(), 'new user entry\n')
+                executables = {call.args[0][0] for call in run.call_args_list}
+                self.assertEqual(executables, {'/usr/bin/loginctl', '/usr/bin/systemctl'})
+
     def test_setup_success_only_browser_auth_and_service_calls(self):
         report = engine.Preflight('debian', (), (), (), True, False)
         snapshot = type('Snapshot', (), {'state': 'online'})()
@@ -242,7 +311,8 @@ class EngineTests(unittest.TestCase):
              patch.object(engine, 'run_command', return_value=subprocess.CompletedProcess([], 0, '', '')), \
              patch.object(engine, 'wait_server'), patch.object(engine, 'rclone_test'), \
              patch.object(engine, 'collect_snapshot', return_value=snapshot), \
-             patch.object(engine, 'set_autostart'), patch.object(engine, 'add_bookmark'), \
+             patch.object(engine, 'set_autostart', side_effect=PermissionError) as autostart, \
+             patch.object(engine, 'add_bookmark', side_effect=OSError) as bookmark, \
              patch('mount_safety.cleanup_stale_mount'):
             result = engine.connect(self.config, self.cancel, self.messages.append)
         self.assertTrue(result.managed)
@@ -252,7 +322,11 @@ class EngineTests(unittest.TestCase):
         self.assertFalse(config.call_args.args[2].is_set())
         self.assertNotIn('local-only', '\n'.join(self.messages))
         tx.return_value.rollback.assert_not_called()
-        self.assertTrue(s.settings_path().exists())
+        autostart.assert_called_once_with(True)
+        bookmark.assert_called_once_with(self.config)
+        self.assertEqual(s.load_settings(), result)
+        self.assertIn('Could not update tray startup', self.messages[-1])
+        self.assertIn('Could not add the Files bookmark', self.messages[-1])
 
     def test_setup_failure_rolls_back_and_requires_reset_approval(self):
         report = engine.Preflight('debian', (), (), (), True, False)
@@ -287,6 +361,24 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(engine.recovered_credential(self.config)[0], 'issued-local-password')
         engine.clear_recovery(self.config)
         self.assertFalse(record.exists())
+
+    def test_recovery_keeps_latest_per_profile_and_migrates_legacy_files(self):
+        directory = s.config_dir() / 'credential-recovery'
+        other = replace(self.config, profile=self.config.profile + '-other')
+        other_record = engine.preserve_credential(other, 'other-secret')
+        old = directory / f'{self.config.profile}-{uuid.uuid4()}.json'
+        engine.atomic_write(old, json.dumps({'profile': self.config.profile, 'username': 'sync', 'password': 'old-secret'}))
+        self.assertEqual(engine.recovered_credential(self.config), ('old-secret', old))
+        new = engine.preserve_credential(self.config, 'new-secret')
+        self.assertFalse(old.exists())
+        self.assertEqual(engine.preserve_credential(self.config, 'newest-secret'), new)
+        self.assertEqual(engine.recovered_credential(self.config), ('newest-secret', new))
+        self.assertEqual(set(directory.iterdir()), {new, other_record})
+        with patch.object(engine, 'atomic_write', side_effect=OSError('disk full')), self.assertRaises(OSError):
+            engine.preserve_credential(self.config, 'write-failed')
+        self.assertEqual(engine.recovered_credential(self.config), ('newest-secret', new))
+        engine.clear_recovery(self.config)
+        self.assertEqual(list(directory.iterdir()), [other_record])
 
     def test_bookmark_keeps_other_entries_and_no_duplicates(self):
         path = self.home / '.config/gtk-3.0/bookmarks'

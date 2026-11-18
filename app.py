@@ -5,25 +5,37 @@ from __future__ import annotations
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 import json
+import logging
 from pathlib import Path
 import sys
 import threading
+import time
 
 from dataclasses import replace
-from settings import APP_NAME, VERSION, Settings, load_settings, save_settings
+from settings import APP_NAME, VERSION, Settings, load_settings, save_settings, settings_path
 from ui_policy import tray_state, connection_notice, TRAY_ENTRY_KEYS, PAGES, WebDAVTimeoutGrace
-from keepalive import KeepAliveSchedule, ping
+from keepalive import KeepAliveResult, KeepAliveSchedule, ping
 from session_guidance import (AUTO_LOGOUT_HINT, AUTO_LOGOUT_HELP, KEEPALIVE_POLICY_NOTE,
                               SECURITY_URL)
 from backend import (APP_DIR, APP_ID, Snapshot, autostart_path, collect_snapshot,
                      redact, set_autostart)
 
+LOG = logging.getLogger(__name__)
+EXPIRY_RETRY_SECONDS = 60
 
-def run_gui() -> int:
-    import gi
-    gi.require_version("Gtk", "3.0")
-    gi.require_version("AyatanaAppIndicator3", "0.1")
-    from gi.repository import AyatanaAppIndicator3 as Indicator, Gio, GLib, Gtk
+
+class GuiUnavailable(RuntimeError):
+    pass
+
+
+def run_gui(settings: Settings) -> int:
+    try:
+        import gi
+        gi.require_version("Gtk", "3.0")
+        gi.require_version("AyatanaAppIndicator3", "0.1")
+        from gi.repository import AyatanaAppIndicator3 as Indicator, Gio, GLib, Gtk
+    except (ImportError, ValueError) as exc:
+        raise GuiUnavailable(str(exc)) from exc
 
     class Application(Gtk.Application):
         def __init__(self):
@@ -39,7 +51,7 @@ def run_gui() -> int:
             self.smoke = False
             self.smoke_errors = []
             self.smoke_exit_code = 0
-            self.settings = load_settings()
+            self.settings = settings
             self.cancel_event = None
             self.cancel_enabled = False
             self.operation_retry = None
@@ -49,6 +61,8 @@ def run_gui() -> int:
             self.keepalive_cancel = None
             self.keepalive_future = None
             self.observed_expiry = None
+            self.expiry_retry_key = None
+            self.expiry_retry_at = 0.0
             self.history_future = None
 
         def do_startup(self):
@@ -333,8 +347,8 @@ def run_gui() -> int:
             self.repaint_requested = self.repaint_requested or repaint
             if self.closing or self.refreshing:
                 return
-            self.refreshing = True
             future = self.pool.submit(collect_snapshot, self.settings)
+            self.refreshing = True
             future.add_done_callback(lambda result: GLib.idle_add(self.refreshed, result))
 
         def refreshed(self, future):
@@ -346,7 +360,8 @@ def run_gui() -> int:
                 self.display_snapshot = self.timeout_grace.update(self.snapshot, bool(self.busy))
                 expiry_key = (self.snapshot.session_issued_at, self.snapshot.webdav.active_exit_monotonic)
                 if (self.snapshot.auth_reason == 'expired' and self.snapshot.session_issued_at and not self.smoke
-                        and self.observed_expiry != expiry_key and self.history_future is None):
+                        and self.observed_expiry != expiry_key and self.history_future is None
+                        and (self.expiry_retry_key != expiry_key or time.monotonic() >= self.expiry_retry_at)):
                     from activity_history import observe_expiry
                     self.history_future = self.pool.submit(observe_expiry, self.settings, self.snapshot)
                     self.history_future.add_done_callback(lambda result: GLib.idle_add(self.expiry_recorded, expiry_key, result))
@@ -355,7 +370,7 @@ def run_gui() -> int:
                 self.render(force_icon=repaint)
             except Exception as exc:
                 self.set_message("Could not check status: " + str(exc))
-                self.smoke_errors.append(str(exc))
+                self.smoke_errors.append(redact(str(exc)))
             return False
 
         def expiry_recorded(self, key, future):
@@ -364,8 +379,13 @@ def run_gui() -> int:
                 try:
                     future.result()
                     self.observed_expiry = key
+                    self.expiry_retry_key = None
                 except (OSError, ValueError):
-                    self.set_message('Could not record session-expiry history; check private history permissions.')
+                    first_failure = self.expiry_retry_key != key
+                    self.expiry_retry_key = key
+                    self.expiry_retry_at = time.monotonic() + EXPIRY_RETRY_SECONDS
+                    if first_failure:
+                        self.set_message('Could not record session-expiry history; check private history permissions.')
             return False
 
         def render(self, force_icon=False):
@@ -443,8 +463,12 @@ def run_gui() -> int:
         def tick(self):
             if self.closing:
                 return False
-            self.refresh()
-            self.keepalive_tick()
+            try:
+                self.refresh()
+                self.keepalive_tick()
+            except Exception as exc:
+                # An exception escaping a GLib timeout removes the source.
+                LOG.warning("Monitor tick failed; will retry: %s", redact(str(exc)))
             return True
 
         def keepalive_tick(self):
@@ -454,8 +478,13 @@ def run_gui() -> int:
                                                         bool(self.snapshot and self.snapshot.recovery_busy))
             if generation is None:
                 return
-            self.keepalive_cancel = threading.Event()
-            self.keepalive_future = self.pool.submit(ping, self.settings, self.keepalive_cancel)
+            cancel = threading.Event()
+            try:
+                self.keepalive_future = self.pool.submit(ping, self.settings, cancel)
+            except Exception:
+                self.keepalive_schedule.pause()
+                raise
+            self.keepalive_cancel = cancel
             self.keepalive_future.add_done_callback(lambda result: GLib.idle_add(self.keepalive_finished, generation, result))
             self.render()
 
@@ -466,12 +495,17 @@ def run_gui() -> int:
                 return False
             try:
                 result = future.result()
-                self.keepalive_schedule.complete(generation, result)
             except Exception:
-                from keepalive import KeepAliveResult
-                self.keepalive_schedule.complete(generation, KeepAliveResult('failed', 'Keep-alive could not complete', 'unknown'))
-            self.render()
-            self.refresh()
+                result = KeepAliveResult('failed', 'Keep-alive could not complete', 'unknown')
+            try:
+                self.keepalive_schedule.complete(generation, result)
+                self.render()
+            except Exception as exc:
+                LOG.warning("Could not update keep-alive display: %s", redact(str(exc)))
+            try:
+                self.refresh()
+            except Exception as exc:
+                LOG.warning("Could not queue a status refresh: %s", redact(str(exc)))
             return False
 
         def pause_keepalive(self):
@@ -636,7 +670,10 @@ def run_gui() -> int:
                 self.keepalive_item.handler_block(self.keepalive_handler)
                 self.keepalive_item.set_active(self.settings.keepalive_enabled)
                 self.keepalive_item.handler_unblock(self.keepalive_handler)
-                self.set_message("Operation completed. Configuration and connection status have been refreshed.")
+                # Connect supplies its own completion message, including any
+                # non-fatal desktop integration warnings.
+                if not isinstance(result, Settings):
+                    self.set_message("Operation completed. Configuration and connection status have been refreshed.")
                 self.notify("Sync operation completed", "Open the tray status window to see the current connection.")
                 self.autostart_item.handler_block(self.autostart_handler)
                 self.autostart_item.set_active(autostart_path().exists())
@@ -742,7 +779,7 @@ def run_gui() -> int:
         def toggle_autostart(self, item):
             try:
                 set_autostart(item.get_active())
-            except OSError as exc:
+            except (OSError, ValueError) as exc:
                 item.handler_block(self.autostart_handler)
                 item.set_active(not item.get_active())
                 item.handler_unblock(self.autostart_handler)
@@ -818,14 +855,35 @@ def main() -> int:
     parser.add_argument("--smoke-test", action="store_true", help="Exercise GUI startup, status loading, and shutdown")
     parser.add_argument('--tray-icon-test', action='store_true', help='Test amber/green/red tray rendering without changing services')
     args = parser.parse_args()
+
+    def startup_error(code: str, message: str) -> int:
+        if args.status_json:
+            print(json.dumps({"error": {"code": code, "message": message}}, indent=2))
+        else:
+            print(message, file=sys.stderr)
+        return 1
+
+    try:
+        settings = load_settings()
+    except OSError as exc:
+        return startup_error("unreadable_settings",
+                             f"Could not read settings at {settings_path()}: {redact(str(exc))}. "
+                             "Check file and directory permissions.")
+    except ValueError as exc:
+        return startup_error("invalid_settings",
+                             f"Invalid settings at {settings_path()}: {redact(str(exc))}. "
+                             "Back up and rename this file, then retry to rediscover the current setup or reconfigure it.")
     if args.status_json:
-        print(json.dumps(collect_snapshot().as_dict(), indent=2))
+        try:
+            output = json.dumps(collect_snapshot(settings).as_dict(), indent=2)
+        except Exception as exc:
+            return startup_error("status_unavailable", "Could not collect status: " + redact(str(exc)))
+        print(output)
         return 0
     try:
-        return run_gui()
-    except (ImportError, ValueError) as exc:
-        print("GTK / Ayatana AppIndicator is required: " + str(exc), file=sys.stderr)
-        return 1
+        return run_gui(settings)
+    except GuiUnavailable as exc:
+        return startup_error("gtk_unavailable", "GTK / Ayatana AppIndicator is required: " + str(exc))
 
 
 if __name__ == "__main__":

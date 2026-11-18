@@ -10,6 +10,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import fcntl
+import hashlib
 import json
 import math
 import os
@@ -163,10 +164,26 @@ def _decode(data: bytes) -> list[dict]:
     return records
 
 
-def read_history() -> list[dict]:
+_decoded_history = (None, ())
+
+
+def _history_records() -> tuple[dict, ...]:
+    global _decoded_history
+    # Always recheck private-file safety, including on a cache hit. Cache
+    # only validated records, not raw input or the time-dependent report.
     path = history_path()
-    records = _decode(_read_file(path.with_suffix('.jsonl.1'))) + _decode(_read_file(path))
-    return sorted(records, key=lambda record: record['epoch'])
+    rotated, current = _read_file(path.with_suffix('.jsonl.1')), _read_file(path)
+    key = (hashlib.sha256(rotated).digest(), hashlib.sha256(current).digest())
+    cached_key, records = _decoded_history
+    if key != cached_key:
+        ordered = sorted(_decode(rotated) + _decode(current), key=lambda record: record['epoch'])
+        records = tuple(ordered)
+        _decoded_history = (key, records)
+    return records
+
+
+def read_history() -> list[dict]:
+    return [record.copy() for record in _history_records()]
 
 
 def append(record: dict, unique=False) -> None:
@@ -179,7 +196,7 @@ def append(record: dict, unique=False) -> None:
         if unique and record['event'] == 'session_expired':
             if any(r['event'] == 'session_expired' and r.get('session_issued_at') == record.get('session_issued_at')
                    and r.get('server_exit_monotonic') == record.get('server_exit_monotonic')
-                   and r.get('boot_id') == record.get('boot_id') for r in read_history()):
+                   and r.get('boot_id') == record.get('boot_id') for r in _history_records()):
                 return
         path = history_path()
         backup = path.with_suffix('.jsonl.1')
@@ -255,7 +272,7 @@ def _duration(seconds: float) -> str:
 def report(settings: Settings, snapshot) -> dict:
     """Observation only: no unverified claim of a configured TTL or inactivity policy."""
     issued = session_issued_at(settings)
-    all_records = read_history()
+    all_records = _history_records()
     records = [r for r in all_records if issued and r.get('session_issued_at') == issued]
     successes = [r for r in records if r['event'] == 'success']
     failures = [r for r in records if r['event'] == 'failed']

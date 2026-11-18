@@ -12,6 +12,8 @@ import shutil
 import subprocess
 import tempfile
 
+from desktop_entry import desktop_quote
+
 APP_ID = "io.github.vera.SyncWebDAVTray"
 APP_NAME = "Sync WebDAV Desktop"
 PACKAGE = "sync-webdav-desktop"
@@ -45,33 +47,20 @@ def runtime_files(source: Path | None = None) -> list[Path]:
         if path.is_symlink() or not path.is_file():
             raise ValueError(f"Runtime files must be regular files, not symlinks: {path}")
         result.append(path)
-    required = {"app.py", "backend.py", "recovery.py", "icons/sync-webdav-online.svg"}
+    required = {"app.py", "backend.py", "desktop_entry.py", "icons/sync-webdav-online.svg"}
     missing = required - {path.relative_to(source).as_posix() for path in result}
     if missing:
         raise ValueError(f"Missing application files: {', '.join(sorted(missing))}")
     return result
 
 
-def desktop_quote(argument: str) -> str:
-    """Desktop Exec has its own quoting rules, not shell quoting.
-
-    Backslashes first escape the reserved characters inside double quotes, then
-    double again for the desktop file's string-value escape layer. Percent signs
-    must be doubled to avoid interpreting paths as field codes.
-    """
-    if any(char in argument for char in ("\n", "\r", "\x00")):
-        raise ValueError("Launcher paths cannot contain newlines or NUL bytes")
-    escaped = argument.replace("%", "%%")
-    for char in ("\\", '"', "`", "$"):
-        escaped = escaped.replace(char, "\\" + char)
-    return '"' + escaped.replace("\\", "\\\\") + '"'
-
-
-def desktop_entry(launcher: Path, tray: bool = False) -> str:
+def desktop_entry(program: Path, tray: bool = False) -> str:
+    # GLib checks the executable before expanding Exec field codes. Keep
+    # percent signs in the script argument, never in the executable path.
     return ("[Desktop Entry]\nType=Application\n"
             f"Name={APP_NAME}\n"
             "Comment=Independent, unofficial desktop app for Sync.com WebDAV\n"
-            f"Exec={desktop_quote(str(launcher))}" + (" --tray" if tray else "") + "\n"
+            f"Exec=/usr/bin/python3 {desktop_quote(str(program))}" + (" --tray" if tray else "") + "\n"
             f"Icon={APP_ID}\nTerminal=false\nCategories=Network;\n"
             "Keywords=Sync;WebDAV;rclone;mount;cloud;\nStartupNotify=false\n"
             + ("X-GNOME-Autostart-Delay=15\n" if tray else ""))
@@ -97,6 +86,8 @@ def atomic_write(path: Path, content: bytes, mode: int = 0o644) -> None:
         with os.fdopen(fd, "wb") as stream:
             stream.write(content)
             os.fchmod(stream.fileno(), mode)
+            stream.flush()
+            os.fsync(stream.fileno())
         os.replace(temporary, path)
     finally:
         Path(temporary).unlink(missing_ok=True)
@@ -174,8 +165,8 @@ def main(argv: list[str] | None = None) -> int:
         else:
             files = runtime_files()
             # Validate generated paths before copying any application files.
-            entry = desktop_entry(launcher)
-            tray_entry = desktop_entry(launcher, tray=True)
+            entry = desktop_entry(application / "app.py")
+            tray_entry = desktop_entry(application / "app.py", tray=True)
             wrapper = shell_launcher(application)
             desired = {path.relative_to(SOURCE).as_posix() for path in files}
             for path in files:

@@ -69,9 +69,12 @@ files for destructive cases.
   state. Test network failure/cancellation; package operations may need repair.
 - Removal deletes only marked managed units. External changes to units prevent
   automatic removal. Cloud files, profiles and mount directories survive.
-- Setup failure rolls back local units/settings/bookmarks/autostart; inspect
-  rollback failure messages. Vendor session/account changes and installed system
-  packages are not transactionally reversible.
+- Setup failure rolls back local units/settings; inspect rollback failure
+  messages. Verify that Files bookmark or tray autostart edits made during
+  sign-in survive failed setup. Desktop integration is applied only after a
+  successful connection; an integration failure does not disconnect the drive.
+  Vendor session/account changes and installed packages are not transactionally
+  reversible.
 
 ## Activity evidence
 

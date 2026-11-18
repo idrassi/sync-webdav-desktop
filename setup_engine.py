@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import configparser
 from dataclasses import dataclass, replace
+import hashlib
 import http.client
 import os
 from pathlib import Path
@@ -24,13 +25,14 @@ from typing import Callable
 
 from diagnostics import (LOG_DROPIN, LOG_MARKER, legacy_logging_dropin, log_path,
                          logging_enabled, prepare_log)
-from authentication import AuthenticationError, Cancelled, browser_login, terminate_group
-from backend import (APP_DIR, OperationError, SERVICES, WEBDAV_BIN, change_services,
-                     autostart_path, collect_snapshot, operation_lock, redact, run_command, set_autostart)
+from authentication import Cancelled, browser_login, terminate_group
+from backend import (APP_DIR, OperationError, SERVICES, SYSTEMCTL, WEBDAV_BIN, change_services,
+                     collect_snapshot, operation_lock, redact, run_command, set_autostart)
 from settings import (HOME, Settings, atomic_write, config_dir, load_settings,
                       private_config_dir, reject_symlink_path, save_settings, settings_path, unit_dir)
 
 INSTALLER_URL = "https://www10.sync.com/download/webdav/install.sh"
+LOGINCTL = "/usr/bin/loginctl"
 MARKER = "# Managed by Sync WebDAV Desktop"
 Progress = Callable[[str], None]
 
@@ -100,10 +102,10 @@ def preflight(settings: Settings) -> Preflight:
                     if not shutil.which(name) and not (name == "modprobe" and Path("/usr/sbin/modprobe").exists()))
     if not shutil.which("xdg-open"):
         errors.append("Browser sign-in requires xdg-open. Install the xdg-utils system package before connecting.")
-    if not shutil.which("systemctl"):
+    if not os.access(SYSTEMCTL, os.X_OK):
         errors.append("systemctl is unavailable.")
     else:
-        result = run_command(["systemctl", "--user", "show-environment"], timeout=5)
+        result = run_command([SYSTEMCTL, "--user", "show-environment"], timeout=5)
         if result.returncode:
             errors.append("Your systemd user session is unavailable. Launch from a logged-in Linux desktop.")
     if missing and distro_family() == "unknown":
@@ -220,7 +222,7 @@ def install_requirements(settings: Settings, cancel: threading.Event, progress: 
         raise OperationError("FUSE is still inaccessible. Check distribution/device permissions; no automatic chmod is performed.")
 
 
-def install_server(cancel: threading.Event, progress: Progress, update: bool = False) -> None:
+def install_server(settings: Settings, cancel: threading.Event, progress: Progress, update: bool = False) -> None:
     if WEBDAV_BIN.is_file() and os.access(WEBDAV_BIN, os.X_OK) and not update:
         progress("Using the installed Sync WebDAV server…")
         return
@@ -228,11 +230,16 @@ def install_server(cancel: threading.Event, progress: Progress, update: bool = F
     with tempfile.TemporaryDirectory(prefix="installer-", dir=config_dir()) as directory:
         installer = Path(directory) / "install.sh"
         # Fixed URL, TLS verification, only HTTPS redirects. Never elevate it.
-        run(["/usr/bin/curl", "--proto", "=https", "--proto-redir", "=https", "--tlsv1.2",
+        run(["/usr/bin/curl", "--disable", "--proto", "=https", "--proto-redir", "=https", "--tlsv1.2",
              "--fail", "--location", "--silent", "--show-error", "--connect-timeout", "10",
              "--max-time", "60", "--output", str(installer), INSTALLER_URL], cancel, timeout=75)
-        if installer.stat().st_size > 1024 * 1024 or not installer.read_bytes().startswith(b"#!/"):
+        if installer.stat().st_size > 1024 * 1024:
             raise OperationError("Sync's installer response was not a valid shell script.")
+        script = installer.read_bytes()
+        if not script.startswith(b"#!/"):
+            raise OperationError("Sync's installer response was not a valid shell script.")
+        if settings.installer_sha256 and hashlib.sha256(script).hexdigest() != settings.installer_sha256.lower():
+            raise OperationError("Sync's installer does not match the configured SHA-256 pin; it was not run. Verify the new installer before updating the pin.")
         progress("Installing the vendor server; its installer verifies the binary checksum…")
         run(["/bin/sh", str(installer)], cancel, timeout=600)
     run([str(WEBDAV_BIN), "--version"], cancel, timeout=15)
@@ -300,6 +307,18 @@ WantedBy=default.target
 """}
 
 
+def _legacy_recovery_paths(directory: Path, profile: str):
+    """Recognize old <profile>-<UUID>.json records without matching other profiles."""
+    prefix = profile + "-"
+    for path in directory.glob(prefix + "*.json"):
+        suffix = path.stem[len(prefix):]
+        try:
+            if str(uuid.UUID(suffix)) == suffix:
+                yield path
+        except ValueError:
+            continue
+
+
 def preserve_credential(settings: Settings, password: str) -> Path:
     """Durable issuance record before mounting; never discarded on rollback.
 
@@ -313,10 +332,14 @@ def preserve_credential(settings: Settings, password: str) -> Path:
     reject_symlink_path(directory)
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     directory.chmod(0o700)
-    target = directory / f"{settings.profile}-{uuid.uuid4()}.json"
+    target = directory / f"{settings.profile}.current.json"
     atomic_write(target, json.dumps({"profile": settings.profile, "port": settings.port,
                                    "username": "sync", "password": password,
                                    "created": time.strftime("%Y-%m-%dT%H:%M:%S")}) + "\n")
+    # Replace the current record first, then retire older-format records. A
+    # failed write must not discard the last recoverable password.
+    for path in _legacy_recovery_paths(directory, settings.profile):
+        path.unlink(missing_ok=True)
     return target
 
 
@@ -325,13 +348,18 @@ def recovered_credential(settings: Settings) -> tuple[str | None, Path | None]:
     if not directory.exists():
         return None, None
     reject_symlink_path(directory)
-    paths = sorted(directory.glob(settings.profile + "-*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    target = directory / f"{settings.profile}.current.json"
+    reject_symlink_path(target)
+    paths = [target] if target.exists() else sorted(
+        _legacy_recovery_paths(directory, settings.profile), key=lambda p: p.lstat().st_mtime_ns, reverse=True)
     for path in paths:
         reject_symlink_path(path)
-        if path.stat().st_uid != os.getuid() or path.stat().st_mode & 0o077:
+        mode = path.stat()
+        if not path.is_file() or mode.st_uid != os.getuid() or mode.st_mode & 0o077:
             raise OperationError("Unsafe credential recovery record permissions")
         value = json.loads(path.read_text())
-        if value.get("profile") == settings.profile and value.get("username") == "sync" and value.get("password"):
+        if (isinstance(value, dict) and value.get("profile") == settings.profile and value.get("username") == "sync"
+                and isinstance(value.get("password"), str) and value["password"]):
             return value["password"], path
     return None, None
 
@@ -340,9 +368,9 @@ def clear_recovery(settings: Settings) -> None:
     directory = config_dir() / "credential-recovery"
     if directory.exists():
         reject_symlink_path(directory)
-        for path in directory.glob(settings.profile + "-*.json"):
-            reject_symlink_path(path)
-            path.unlink()
+        for path in _legacy_recovery_paths(directory, settings.profile):
+            path.unlink(missing_ok=True)
+        (directory / f"{settings.profile}.current.json").unlink(missing_ok=True)
 
 
 def write_rclone(settings: Settings, password: str, cancel: threading.Event) -> None:
@@ -402,11 +430,10 @@ class Transaction:
         root = config_dir() / "backups"
         root.mkdir(mode=0o700, parents=True, exist_ok=True)
         self.directory = Path(tempfile.mkdtemp(prefix=stamp + "-", dir=root))
-        bookmark_path = Path(os.environ.get("XDG_CONFIG_HOME", str(HOME / ".config"))) / "gtk-3.0/bookmarks"
         logging_override = unit_dir() / 'sync-webdav.service.d' / LOG_DROPIN
         self.mount_settings = settings
         self.previous_settings = load_settings()
-        for path in [unit_dir() / name for name in SERVICES] + [settings.config_file, settings_path(), autostart_path(), bookmark_path, logging_override]:
+        for path in [unit_dir() / name for name in SERVICES] + [settings.config_file, settings_path(), logging_override]:
             if path.is_symlink():
                 raise OperationError(f"Refusing to replace symbolic link: {path}")
             self.files[path] = path.read_bytes() if path.is_file() else None
@@ -414,11 +441,11 @@ class Transaction:
                 atomic_write(self.directory / f"{len(self.files)}-{path.name}", self.files[path])
         self.linger_changed = False
         user = pwd.getpwuid(os.getuid()).pw_name
-        linger = run_command(["loginctl", "show-user", user, "--property=Linger", "--value"])
+        linger = run_command([LOGINCTL, "show-user", user, "--property=Linger", "--value"])
         self.had_linger = linger.returncode == 0 and linger.stdout.strip() == "yes"
         self.states = {}
         for name in SERVICES:
-            result = run_command(["systemctl", "--user", "show", name, "--property=ActiveState,UnitFileState"])
+            result = run_command([SYSTEMCTL, "--user", "show", name, "--property=ActiveState,UnitFileState"])
             values = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
             self.states[name] = values
 
@@ -429,13 +456,13 @@ class Transaction:
         progress("Restoring the previous local configuration after unsuccessful setup…")
         if self.linger_changed and not self.had_linger:
             user = pwd.getpwuid(os.getuid()).pw_name
-            result = run_command(["/usr/bin/pkexec", "/usr/bin/loginctl", "disable-linger", user], timeout=120)
+            result = run_command(["/usr/bin/pkexec", LOGINCTL, "disable-linger", user], timeout=120)
             if result.returncode:
                 progress("Pre-login startup could not be rolled back; user lingering remains enabled. Other user services may keep running after logout.")
         for name in SERVICES[::-1]:
-            result = run_command(["systemctl", "--user", "stop", name], timeout=150)
+            result = run_command([SYSTEMCTL, "--user", "stop", name], timeout=150)
             if result.returncode:
-                state = run_command(["systemctl", "--user", "show", name, "--property=LoadState"])
+                state = run_command([SYSTEMCTL, "--user", "show", name, "--property=LoadState"])
                 if "LoadState=not-found" not in state.stdout:
                     raise OperationError("Rollback could not stop a Sync service. Private backups are kept at " + str(self.directory))
         from mount_safety import cleanup_stale_mount
@@ -458,7 +485,7 @@ class Transaction:
             # the RESTORED endpoint/options with the newly issued password.
             write_rclone(restored, self.issued_password, threading.Event())
         self.issued_password = None
-        result = run_command(["systemctl", "--user", "daemon-reload"])
+        result = run_command([SYSTEMCTL, "--user", "daemon-reload"])
         if result.returncode:
             raise OperationError("Rollback could not reload user services")
         for name, state in self.states.items():
@@ -466,7 +493,7 @@ class Transaction:
             if enabled not in {"enabled", "enabled-runtime", "disabled", "not-found", ""}:
                 continue  # Do not rewrite masks, static units or external policy.
             action = "enable" if enabled in {"enabled", "enabled-runtime"} else "disable"
-            command = ["systemctl", "--user", action]
+            command = [SYSTEMCTL, "--user", action]
             if enabled == "enabled-runtime": command.append("--runtime")
             command.append(name)
             result = run_command(command)
@@ -474,12 +501,14 @@ class Transaction:
                 raise OperationError("Rollback could not restore service startup state")
         for name, state in self.states.items():
             if state.get("ActiveState") == "active":
-                result = run_command(["systemctl", "--user", "start", name], timeout=150)
+                result = run_command([SYSTEMCTL, "--user", "start", name], timeout=150)
                 if result.returncode:
                     raise OperationError("Rollback restored files but could not restart previous services; use Sign in & restore")
 
 
 def ensure_port_free(settings: Settings) -> None:
+    # Early conflict check only. The vendor takes no pre-bound socket, so it
+    # must still bind the port itself after sign-in.
     with socket.socket() as probe:
         try:
             probe.bind(("127.0.0.1", settings.port))
@@ -490,7 +519,11 @@ def ensure_port_free(settings: Settings) -> None:
 def add_bookmark(settings: Settings) -> None:
     path = Path(os.environ.get("XDG_CONFIG_HOME", str(HOME / ".config"))) / "gtk-3.0/bookmarks"
     uri = Path(settings.mount_point).as_uri()
-    old = path.read_text() if path.exists() else ""
+    reject_symlink_path(path)
+    try:
+        old = path.read_text()
+    except FileNotFoundError:
+        old = ""
     if not any(line.split(" ", 1)[0] == uri for line in old.splitlines()):
         atomic_write(path, old.rstrip("\n") + ("\n" if old else "") + uri + " Sync Drive\n")
 
@@ -514,16 +547,16 @@ def connect(settings: Settings, cancel: threading.Event, progress: Progress,
     with operation_lock():
         private_config_dir()
         install_requirements(settings, cancel, progress)
-        install_server(cancel, progress)
+        install_server(settings, cancel, progress)
         transaction = Transaction(settings)
         password = None
         try:
             progress("Stopping existing Sync services before authentication…")
             for name in SERVICES[::-1]:
                 # Missing units are expected on a first installation.
-                result = run_command(["systemctl", "--user", "show", name, "--property=LoadState"])
+                result = run_command([SYSTEMCTL, "--user", "show", name, "--property=LoadState"])
                 if "LoadState=loaded" in result.stdout:
-                    run(["systemctl", "--user", "stop", name], cancel, timeout=150)
+                    run([SYSTEMCTL, "--user", "stop", name], cancel, timeout=150)
             # Both the old and proposed paths must be clear before changing
             # configuration. Never list a dead FUSE endpoint.
             from mount_safety import cleanup_stale_mount
@@ -534,8 +567,8 @@ def connect(settings: Settings, cancel: threading.Event, progress: Progress,
             ensure_port_free(settings)
             issuance = []
             def issued(value):
-                issuance.append(preserve_credential(settings, value))
                 transaction.credential_issued(value)
+                issuance.append(preserve_credential(settings, value))
             password = browser_login(WEBDAV_BIN, settings.profile, cancel, progress,
                                      reset=reset_credential, on_credential=issued)
             if password and not issuance:
@@ -561,31 +594,26 @@ def connect(settings: Settings, cancel: threading.Event, progress: Progress,
                 if not override.read_text().startswith(LOG_MARKER):
                     raise OperationError("The logging override was modified externally; it was not removed")
                 override.unlink()
-            run(["systemctl", "--user", "daemon-reload"], cancel)
+            run([SYSTEMCTL, "--user", "daemon-reload"], cancel)
             action = "enable" if settings.start_services else "disable"
-            run(["systemctl", "--user", action, *SERVICES], cancel)
+            run([SYSTEMCTL, "--user", action, *SERVICES], cancel)
             if settings.before_login:
                 user = pwd.getpwuid(os.getuid()).pw_name
                 transaction.linger_changed = True
-                privileged(["/usr/bin/loginctl", "enable-linger", user], cancel, progress)
+                privileged([LOGINCTL, "enable-linger", user], cancel, progress)
             progress("Starting Sync WebDAV and testing the authenticated Rclone connection…")
-            run(["systemctl", "--user", "start", SERVICES[0]], cancel, timeout=150)
+            run([SYSTEMCTL, "--user", "start", SERVICES[0]], cancel, timeout=150)
             wait_server(settings, cancel)
             rclone_test(settings, cancel)
             progress("Mounting your Sync files…")
-            run(["systemctl", "--user", "start", SERVICES[1]], cancel, timeout=150)
+            run([SYSTEMCTL, "--user", "start", SERVICES[1]], cancel, timeout=150)
             verified = replace(settings, managed=True, configured=True)
             snapshot = collect_snapshot(verified)
             if snapshot.state != "online":
                 raise OperationError("Services started but the expected mount could not be verified")
             save_settings(verified)
-            set_autostart(settings.tray_autostart)
-            if settings.bookmark:
-                add_bookmark(settings)
             clear_recovery(settings)
             transaction.issued_password = None
-            progress("Connected. The drive is mounted and configuration is saved.")
-            return verified
         except BaseException as original:
             password = None
             try:
@@ -596,6 +624,23 @@ def connect(settings: Settings, cancel: threading.Event, progress: Progress,
                     raise original
                 raise OperationError("Setup failed and rollback needs attention: " + str(rollback_error)) from original
             raise
+
+        # Apply desktop integration only after connection commits. These files
+        # can be edited by the desktop or another app during browser sign-in;
+        # never roll them back to a stale snapshot (including deleting a file).
+        warnings = []
+        try:
+            set_autostart(settings.tray_autostart)
+        except (OSError, ValueError):
+            warnings.append("Could not update tray startup; check Preferences and autostart permissions.")
+        if settings.bookmark:
+            try:
+                add_bookmark(settings)
+            except (OSError, ValueError):
+                warnings.append("Could not add the Files bookmark; you can add it manually.")
+        progress("Connected. The drive is mounted and configuration is saved." +
+                 (" " + " ".join(warnings) if warnings else ""))
+        return verified
 
 
 def enable_failure_logging(settings: Settings, cancel: threading.Event, progress: Progress) -> None:
@@ -617,13 +662,13 @@ def enable_failure_logging(settings: Settings, cancel: threading.Event, progress
     previous = override.read_bytes() if override.exists() else None
     atomic_write(override, content)
     try:
-        run(["systemctl", "--user", "daemon-reload"], cancel)
+        run([SYSTEMCTL, "--user", "daemon-reload"], cancel)
     except BaseException:
         if previous is None:
             override.unlink(missing_ok=True)
         else:
             atomic_write(override, previous)
-        run_command(["systemctl", "--user", "daemon-reload"])
+        run_command([SYSTEMCTL, "--user", "daemon-reload"])
         raise
     progress("Private daemon failure logging enabled; it takes effect on the next server start.")
 
@@ -652,10 +697,10 @@ def restart(settings: Settings, cancel: threading.Event, progress: Progress,
         stop_and_cleanup(settings, cancel, progress, allow_lazy)
         enable_failure_logging(settings, cancel, progress)
         progress("Starting Sync WebDAV…")
-        run(["systemctl", "--user", "start", SERVICES[0]], cancel, timeout=150)
+        run([SYSTEMCTL, "--user", "start", SERVICES[0]], cancel, timeout=150)
         wait_server(settings, cancel)
         rclone_test(settings, cancel)
-        run(["systemctl", "--user", "start", SERVICES[1]], cancel, timeout=150)
+        run([SYSTEMCTL, "--user", "start", SERVICES[1]], cancel, timeout=150)
         snapshot = collect_snapshot(settings)
         if snapshot.state != 'online':
             raise OperationError(snapshot.title + '. Check service diagnostics.')
@@ -680,10 +725,10 @@ def restore(settings: Settings, cancel: threading.Event, progress: Progress,
             write_rclone(settings, password, threading.Event())
         password = None
         progress("Starting WebDAV and verifying the connection…")
-        run(["systemctl", "--user", "start", SERVICES[0]], cancel, timeout=150)
+        run([SYSTEMCTL, "--user", "start", SERVICES[0]], cancel, timeout=150)
         wait_server(settings, cancel)
         rclone_test(settings, cancel)
-        run(["systemctl", "--user", "start", SERVICES[1]], cancel, timeout=150)
+        run([SYSTEMCTL, "--user", "start", SERVICES[1]], cancel, timeout=150)
         if collect_snapshot(settings).state != "online":
             raise OperationError("The mount is not ready. Check service diagnostics.")
         clear_recovery(settings)
@@ -697,13 +742,13 @@ def update_server(settings: Settings, cancel: threading.Event, progress: Progres
         enable_failure_logging(settings, cancel, progress)
         try:
             private_config_dir()
-            install_server(cancel, progress, update=True)
+            install_server(settings, cancel, progress, update=True)
         finally:
             if snapshot.webdav.running:
                 # Once installation stops, restore the prior service state even
                 # after cancellation. The installer never deletes cloud data.
                 units = SERVICES if snapshot.rclone.running else (SERVICES[0],)
-                result = run_command(["systemctl", "--user", "start", *units], timeout=150)
+                result = run_command([SYSTEMCTL, "--user", "start", *units], timeout=150)
                 if result.returncode:
                     raise OperationError("The server update finished but the previous service state could not be restored")
 
@@ -719,7 +764,7 @@ def disconnect(settings: Settings, remove_services: bool = False, allow_lazy: bo
                     raise OperationError("A service was modified externally; it will not be removed automatically")
         stop_and_cleanup(settings, threading.Event(), lambda _: None, allow_lazy)
         if remove_services:
-            result = run_command(["systemctl", "--user", "disable", *SERVICES])
+            result = run_command([SYSTEMCTL, "--user", "disable", *SERVICES])
             if result.returncode:
                 raise OperationError("Could not disable startup services; no service files were removed")
             for name in SERVICES:
@@ -727,5 +772,5 @@ def disconnect(settings: Settings, remove_services: bool = False, allow_lazy: bo
             override = unit_dir() / 'sync-webdav.service.d' / LOG_DROPIN
             if override.exists() and override.read_text().startswith(LOG_MARKER):
                 override.unlink()
-            run_command(["systemctl", "--user", "daemon-reload"])
+            run_command([SYSTEMCTL, "--user", "daemon-reload"])
             save_settings(replace(settings, configured=False, managed=False))

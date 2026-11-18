@@ -270,11 +270,13 @@ A generated password cannot be re-displayed by Sync. To avoid losing one if
 setup is interrupted after issuance, the app immediately saves a **temporary
 plaintext local WebDAV password recovery record**, 0600 inside a 0700 directory:
 `~/.config/sync-webdav-desktop/credential-recovery/`. It is automatically reused
-on retry and deleted after successful connection. It contains **only the local
-WebDAV password**, not the account password/session. Never share this directory
-or private backups. On configuration rollback, newly issued credentials are
-reconciled with the previous same-profile endpoint; account/profile switching
-in-place is rejected.
+on retry and deleted after successful connection. New issuances replace the
+previous record for that profile and remove any older-format records. There is
+no time limit on the latest record because the vendor cannot re-display the
+password. This is **only the local WebDAV password**, not the account password
+or session. Never share this directory or private backups. On configuration
+rollback, newly issued credentials are reconciled with the previous
+same-profile endpoint; account/profile switching in-place is rejected.
 
 If an existing local credential is lost, approve **Replace local WebDAV
 credential** in setup. This requires browser sign-in and invalidates the previous
@@ -283,6 +285,15 @@ No silent reset is performed. Failed/cancelled sign-in recovery can leave servic
 stopped; retry **Sign in & restore**. Package installs and vendor downloads cannot
 be completely undone; cancelling a package operation may require package-manager
 repair. Configuration backups do not back up or revert Sync's cloud data.
+Files bookmarks and tray autostart are updated only after the drive connects.
+If either update fails, the drive stays connected and the app displays a warning.
+
+For optional installer integrity verification, set `"installer_sha256"` in
+`settings.json` to the 64-digit SHA-256 of a trusted copy of Sync's `install.sh`.
+Restart the tray app after editing the pin. Install and Update verify it before
+running the downloaded script. After a vendor installer change, verify the new
+artifact independently before updating the pin. An empty pin (the default) uses
+HTTPS and relies on the vendor installer for binary checksum verification.
 
 Diagnostics mask common credential formats and emails, but may contain folder
 names; inspect before sharing. Do not export credentials, backups, or CLI raw
@@ -305,6 +316,13 @@ Run checks and build distributable archives:
 /usr/bin/python3 app.py --status-json  # read-only diagnostics
 /usr/bin/python3 app.py --smoke-test  # window/tray/status; no recovery
 /usr/bin/python3 app.py --tray-icon-test  # display-only amber/green/red sequence
+```
+
+`--status-json` prints the status object on success. If settings cannot be
+loaded or status cannot be collected, it exits with code 1 and prints an
+`{"error": {"code": "…", "message": "…"}}` object instead.
+
+```bash
 /usr/bin/python3 packaging/build.py
 /usr/bin/python3 packaging/check_distribution.py
 ```

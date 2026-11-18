@@ -1,6 +1,7 @@
 """Offline RPM packaging tests. No RPM tools, root, GI or network required."""
 import ast
 import contextlib
+import errno
 import hashlib
 import importlib.util
 import io
@@ -211,6 +212,19 @@ class RPMPackagingTests(unittest.TestCase):
                         self.assertRaises(ValueError):
                     rpm.check_artifact(artifact, "1.0.0", files, "/mock/rpm")
 
+    @contextlib.contextmanager
+    def build_scratch(self, root):
+        # No real rpmbuild runs in these tests. Verify its /tmp policy without
+        # consuming a possibly quota-limited host /tmp filesystem.
+        temporary_directory = tempfile.TemporaryDirectory
+
+        def stage(**kwargs):
+            self.assertEqual(kwargs, {'prefix': 'sync-webdav-rpm-', 'dir': '/tmp'})
+            return temporary_directory(prefix=kwargs['prefix'], dir=root)
+
+        with mock.patch.object(rpm.tempfile, 'TemporaryDirectory', side_effect=stage) as factory:
+            yield factory
+
     def test_mocked_build_is_unprivileged_and_output_paths_are_not_shell_text(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "space's %name;$(false)"
@@ -220,7 +234,7 @@ class RPMPackagingTests(unittest.TestCase):
                 topdir = Path(kwargs["cwd"])
                 self.assertEqual(kwargs["env"]["HOME"], str(topdir / "HOME"))
                 self.assertEqual(kwargs["env"]["SOURCE_DATE_EPOCH"], "42")
-                self.assertEqual(topdir.parent, Path("/tmp"))
+                self.assertEqual(topdir.parent, Path(directory))
                 self.assertTrue(Path(command[-1]).is_file())
                 path = topdir / "RPMS/noarch" / rpm.artifact_name("1.0.0")
                 path.parent.mkdir()
@@ -228,8 +242,10 @@ class RPMPackagingTests(unittest.TestCase):
                 return ""
             with mock.patch.object(rpm, "prerequisite", side_effect=lambda name: "/mock/" + name), \
                     mock.patch.object(rpm, "run", side_effect=build) as command, \
-                    mock.patch.object(rpm, "check_artifact") as check:
+                    mock.patch.object(rpm, "check_artifact") as check, \
+                    self.build_scratch(directory) as scratch:
                 path = rpm.build_rpm(output, "1.0.0", 42)
+                scratch.assert_called_once_with(prefix='sync-webdav-rpm-', dir='/tmp')
                 self.assertEqual(path.read_bytes(), b"mock built RPM")
                 self.assertEqual(path.stat().st_mode & 0o777, 0o644)
                 check.assert_called_once()
@@ -241,9 +257,24 @@ class RPMPackagingTests(unittest.TestCase):
             output = Path(directory) / "output"
             with mock.patch.object(rpm, "prerequisite", return_value="/mock/tool"), \
                     mock.patch.object(rpm, "run", return_value=""), \
-                    mock.patch.object(rpm, "check_artifact", side_effect=ValueError("invalid RPM")):
+                    mock.patch.object(rpm, "check_artifact", side_effect=ValueError("invalid RPM")), \
+                    self.build_scratch(directory) as scratch:
                 with self.assertRaisesRegex(ValueError, "invalid RPM"):
                     rpm.build_rpm(output, "1.0.0", 42)
+                self.assertFalse(output.exists())
+                scratch.assert_called_once_with(prefix='sync-webdav-rpm-', dir='/tmp')
+
+    def test_staging_storage_failure_never_builds_or_publishes(self):
+        for code in (errno.EDQUOT, errno.ENOSPC):
+            with self.subTest(code=code), tempfile.TemporaryDirectory() as directory:
+                output = Path(directory) / 'output'
+                with mock.patch.object(rpm, 'prerequisite', return_value='/mock/tool'), \
+                     mock.patch.object(rpm, 'stage_sources', side_effect=OSError(code, 'storage unavailable')), \
+                     mock.patch.object(rpm, 'run') as build, self.build_scratch(directory):
+                    with self.assertRaises(OSError) as error:
+                        rpm.build_rpm(output, '1.0.0', 42)
+                self.assertEqual(error.exception.errno, code)
+                build.assert_not_called()
                 self.assertFalse(output.exists())
 
     def test_cli_missing_prerequisites_no_output_and_no_execution(self):

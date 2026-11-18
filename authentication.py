@@ -43,10 +43,14 @@ class CredentialCapture:
             password = re.fullmatch(r"Password:\s*(\S+)", line, flags=re.IGNORECASE)
             if user:
                 self.username = user.group(1)
-            if password and self.username == "sync":
-                self.password = password.group(1)
-                if self.on_credential:
-                    self.on_credential(self.password)
+            if password:
+                # Keep the documented username-first handoff; an unpaired
+                # Password line might be an unrelated prompt. Consume each pair.
+                if self.username == "sync" and password.group(1) != self.password:
+                    self.password = password.group(1)
+                    if self.on_credential:
+                        self.on_credential(self.password)
+                self.username = None
             if "browser" in line.lower() or "https://" in line:
                 self.saw_browser = True
 

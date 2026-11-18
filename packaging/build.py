@@ -21,6 +21,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 # Import the installer helpers without leaving a bytecode cache in the checkout.
 sys.dont_write_bytecode = True
+sys.path.insert(0, str(ROOT))
 SPEC = importlib.util.spec_from_file_location("sync_desktop_installer", ROOT / "install.py")
 INSTALLER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(INSTALLER)

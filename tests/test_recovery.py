@@ -12,7 +12,7 @@ from unittest.mock import patch
 import diagnostics
 import setup_engine as engine
 import settings
-from backend import SERVICES, OperationError
+from backend import SERVICES, SYSTEMCTL, OperationError
 
 
 class RecoveryTests(unittest.TestCase):
@@ -79,7 +79,7 @@ class RecoveryTests(unittest.TestCase):
              patch.object(engine, 'run', return_value='') as run, \
              patch.object(engine, 'change_services') as service:
             engine.configure_failure_logging(self.config, self.cancel, self.messages.append)
-        self.assertEqual(run.call_args.args[0], ['systemctl', '--user', 'daemon-reload'])
+        self.assertEqual(run.call_args.args[0], [SYSTEMCTL, '--user', 'daemon-reload'])
         service.assert_not_called()
         self.assertTrue(diagnostics.logging_enabled())
         self.assertEqual(diagnostics.log_path().stat().st_mode & 0o777, 0o600)

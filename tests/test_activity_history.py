@@ -75,14 +75,41 @@ class HistoryTests(unittest.TestCase):
         with h.history_path().open('a') as stream:stream.write('{broken\n'+json.dumps({'event':'success','token':'leak'})+'\n')
         records=h.read_history();self.assertEqual(len(records),1)
 
-    def test_symlinks_and_public_history_fail_closed(self):
-        h.append(self.event('success',60));path=h.history_path()
+    def test_cache_reuses_parsed_history_but_keeps_session_and_clock_live(self):
+        h.append(self.event('success', 60))
+        with patch.object(h, '_decoded_history', (None, ())), patch.object(h, '_decode', wraps=h._decode) as decode:
+            with patch('time.time', return_value=self.issue_epoch + 100) as clock:
+                report = h.report(self.settings, self.snapshot(expired=False))
+                self.assertEqual(report['session_age_seconds'], 100)
+                self.assertEqual(report['successful_reads'], 1)
+                clock.return_value += 20
+                report = h.report(self.settings, self.snapshot(expired=False))
+                self.assertEqual(report['session_age_seconds'], 120)
+                self.assertEqual(decode.call_count, 2)  # current + rotated, once
+                h.append(self.event('success', 110))
+                self.assertEqual(h.report(self.settings, self.snapshot(expired=False))['successful_reads'], 2)
+                self.assertEqual(decode.call_count, 4)
+                self.session.write_text(json.dumps({'issuedAt': h.utc_time(self.issue_epoch + 118)}))
+                report = h.report(self.settings, self.snapshot(expired=False))
+                self.assertEqual(report['session_age_seconds'], 2)
+                self.assertEqual(report['successful_reads'], 0)
+                self.assertEqual(decode.call_count, 4)
+
+    def test_symlinks_and_public_history_fail_closed_even_after_cache_is_warm(self):
+        h.append(self.event('success', 60))
+        path = h.history_path()
+        self.assertEqual(len(h.read_history()), 1)
         path.chmod(0o644)
-        with self.assertRaises(ValueError):h.read_history()
-        path.unlink();target=Path(self.temp.name)/'unrelated';target.write_text('leave me')
-        path.symlink_to(target)
-        with self.assertRaises(ValueError):h.append(self.event('success',120))
-        self.assertEqual(target.read_text(),'leave me')
+        with self.assertRaises(ValueError):
+            h.read_history()
+        target = path.with_name('regular-history')
+        path.rename(target)
+        target.chmod(0o600)
+        path.symlink_to(target)  # Same bytes as the cached history.
+        with self.assertRaises(ValueError):
+            h.read_history()
+        with self.assertRaises(ValueError):
+            h.append(self.event('success', 120))
 
     def test_expiry_is_deduplicated_and_survives_restart(self):
         with patch('time.time',return_value=self.issue_epoch+3700),patch('time.monotonic',return_value=10090):
