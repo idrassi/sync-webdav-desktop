@@ -37,7 +37,9 @@ only. Publishing another version requires updating the source versions and
 changelog first.
 
 **The tagged commit must contain the workflow.** Adding the workflow after a tag
-was pushed does not automatically run a release for that earlier tag.
+was pushed does not automatically run a release for that earlier tag. Rerunning
+the failed run also uses the original tagged commit, not fixes pushed to the
+branch afterward.
 
 ## Workflow behavior
 
@@ -55,11 +57,16 @@ The compatibility matrix installs the **same** built `.deb` in Ubuntu 20.04,
 22.04, 24.04, 26.04 and Debian Bullseye, Bookworm, Trixie containers. It validates
 dependency resolution, runs unit tests with each stock Python, checks the installed
 desktop entry and Rclone flags, and starts the GUI in an isolated Xvfb/session bus.
-It neither installs the vendor server nor authenticates or mounts cloud files.
+Bullseye's security packages come from the signed Debian archive.
 A parallel RPM matrix installs one noarch RPM on Fedora 43/44, CentOS Stream
 9/10 (with EPEL/CRB in test containers only), openSUSE Leap 16 and Tumbleweed.
-All configured Debian and RPM compatibility jobs must pass before publication. The build/publish runner
-remains Ubuntu 24.04; it does not impose a compiled ABI on this source-only package.
+CentOS Stream 10 uses headless Weston (Wayland) for its GTK smoke test because
+it does not ship Xvfb. No compatibility job installs the vendor server,
+authenticates, or mounts cloud files.
+
+All configured Debian and RPM compatibility jobs must pass before publication.
+The build/publish runner remains Ubuntu 24.04; it does not impose a compiled ABI
+on this source-only package.
 
 A separate job with `contents: write` downloads those files, checks that the
 remote tag still resolves to the tested commit (including annotated tags), and

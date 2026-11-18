@@ -6,6 +6,14 @@ set -eu
 
 cd "${COMPATIBILITY_SOURCE_DIR:-/workspace}"
 export DEBIAN_FRONTEND=noninteractive
+. /etc/os-release
+if [ "$ID" = debian ] && [ "${VERSION_CODENAME:-}" = bullseye ]; then
+    # After Bullseye LTS ended, the live mirror still served the security
+    # index but returned 404s for its packages. Use the signed Debian archive.
+    sed -i '/ bullseye-security /s|://deb\.debian\.org/debian-security |://archive.debian.org/debian-security |' \
+        /etc/apt/sources.list
+fi
+
 # Transient mirror errors must fail validation, not skip dependency checks.
 export APT_CONFIG=/tmp/sync-ci-apt.conf
 printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\n' > "$APT_CONFIG"
@@ -46,5 +54,4 @@ runuser -u ci-test -- /usr/bin/sync-webdav-desktop --version
 runuser -u ci-test -- xvfb-run -a dbus-run-session -- \
     /usr/bin/sync-webdav-desktop --smoke-test
 
-. /etc/os-release
 printf 'PASS: universal package installation/tests/GTK smoke on %s\n' "$PRETTY_NAME"

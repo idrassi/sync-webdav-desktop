@@ -101,7 +101,9 @@ GitHub Actions builds the RPM once in a Fedora 43 container, using a generic
 Tests install dependencies through the target package manager, run the source
 unit suite as an ordinary user, separately exercise installed runtime modules
 outside the checkout, verify package files, and start the installed GUI with
-Xvfb and an isolated bus.
+an isolated session bus. CentOS Stream 10 uses headless Weston via
+`wlheadless-run` from `xwayland-run` because it does not ship Xvfb; the other
+RPM targets use Xvfb. These display tools are CI-only dependencies.
 EPEL/CRB are enabled only inside disposable Enterprise Linux test containers;
 neither the desktop app nor the RPM enables repositories on users' systems.
 
@@ -112,7 +114,7 @@ may request confirmation for the unsigned local package; review it deliberately.
 Signing RPMs can be added with an explicit key-management policy later.
 
 Local same-artifact package installation, unit tests and GTK smoke checks passed
-on Fedora 43, CentOS Stream 9 and openSUSE Tumbleweed. A successful CentOS Stream
+on Fedora 43, CentOS Stream 9/10 and openSUSE Tumbleweed. A successful CentOS Stream
 check is not a claim of full RHEL subscription-repository validation; real RHEL,
 ARM64, browser sign-in, FUSE and boot behavior require desktop/VM acceptance tests.
 Other matrix targets are validated when CI runs, not presumed from these results.

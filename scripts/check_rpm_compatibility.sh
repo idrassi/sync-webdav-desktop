@@ -6,6 +6,7 @@ cd "${COMPATIBILITY_SOURCE_DIR:-/workspace}"
 export PYTHONDONTWRITEBYTECODE=1
 . /etc/os-release
 
+use_wayland=0
 case "$ID" in
     fedora)
         dnf -y install python3 python3-gobject-base gtk3 libayatana-appindicator-gtk3 \
@@ -16,9 +17,17 @@ case "$ID" in
         # Extra repositories are enabled ONLY in this disposable test container,
         # never by the desktop application's package/setup scripts.
         dnf -y install epel-release
+        case "${VERSION_ID:-}" in
+            10|10.*)
+                # EL10 no longer ships Xvfb. Use a headless Wayland compositor.
+                use_wayland=1
+                set -- xwayland-run weston
+                ;;
+            *) set -- xorg-x11-server-Xvfb xorg-x11-xauth ;;
+        esac
         dnf --enablerepo=crb -y install python3 python3-gobject-base gtk3 libayatana-appindicator-gtk3 \
             desktop-file-utils rclone fuse3 util-linux kmod polkit xdg-utils \
-            xorg-x11-server-Xvfb xorg-x11-xauth dbus-daemon shadow-utils
+            dbus-daemon shadow-utils "$@"
         ;;
     opensuse-tumbleweed|opensuse-leap)
         zypper --non-interactive refresh
@@ -66,19 +75,24 @@ desktop-file-validate /usr/share/applications/io.github.vera.SyncWebDAVTray.desk
 /usr/bin/python3 -m compileall -q /usr/share/sync-webdav-desktop
 runuser -u ci-test -- /usr/bin/sync-webdav-desktop --version
 
-# Portable Xvfb setup (openSUSE need not provide Debian's xvfb-run script).
-display_file=$(mktemp)
-Xvfb -displayfd 1 -screen 0 1280x800x24 -nolisten tcp -ac > "$display_file" 2>/tmp/sync-ci-xvfb.log &
-xvfb_pid=$!
-trap 'kill "$xvfb_pid" 2>/dev/null || true; rm -f "$display_file"' 0 HUP INT TERM
-count=0
-while [ ! -s "$display_file" ]; do
-    count=$((count + 1))
-    kill -0 "$xvfb_pid" 2>/dev/null || { cat /tmp/sync-ci-xvfb.log; exit 1; }
-    [ "$count" -lt 50 ] || { cat /tmp/sync-ci-xvfb.log; exit 1; }
-    sleep 0.1
-done
-display=":$(cat "$display_file")"
-runuser -u ci-test -- env DISPLAY="$display" NO_AT_BRIDGE=1 dbus-run-session -- \
-    /usr/bin/sync-webdav-desktop --smoke-test
+if [ "$use_wayland" -eq 1 ]; then
+    runuser -u ci-test -- env GDK_BACKEND=wayland NO_AT_BRIDGE=1 dbus-run-session -- \
+        wlheadless-run -c weston --renderer=pixman -- /usr/bin/sync-webdav-desktop --smoke-test
+else
+    # Portable Xvfb setup (openSUSE need not provide Debian's xvfb-run script).
+    display_file=$(mktemp)
+    Xvfb -displayfd 1 -screen 0 1280x800x24 -nolisten tcp -ac > "$display_file" 2>/tmp/sync-ci-xvfb.log &
+    xvfb_pid=$!
+    trap 'kill "$xvfb_pid" 2>/dev/null || true; rm -f "$display_file"' 0 HUP INT TERM
+    count=0
+    while [ ! -s "$display_file" ]; do
+        count=$((count + 1))
+        kill -0 "$xvfb_pid" 2>/dev/null || { cat /tmp/sync-ci-xvfb.log; exit 1; }
+        [ "$count" -lt 50 ] || { cat /tmp/sync-ci-xvfb.log; exit 1; }
+        sleep 0.1
+    done
+    display=":$(cat "$display_file")"
+    runuser -u ci-test -- env DISPLAY="$display" NO_AT_BRIDGE=1 dbus-run-session -- \
+        /usr/bin/sync-webdav-desktop --smoke-test
+fi
 printf 'PASS: universal RPM installation/tests/GTK smoke on %s\n' "$PRETTY_NAME"

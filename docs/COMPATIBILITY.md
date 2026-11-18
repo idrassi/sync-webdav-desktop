@@ -25,7 +25,7 @@ The package baseline is:
 | Ubuntu 22.04 LTS | 3.10 | Same universal `.deb` |
 | Ubuntu 24.04 LTS | 3.12 | Same universal `.deb` |
 | Ubuntu 26.04 LTS | 3.14 | Same universal `.deb` |
-| Debian 11 Bullseye | 3.9 | Same universal `.deb`; legacy OS security support required |
+| Debian 11 Bullseye | 3.9 | Same universal `.deb`; public LTS has ended |
 | Debian 12 Bookworm | 3.11 | Same universal `.deb` |
 | Debian 13 Trixie | 3.13 | Same universal `.deb` |
 
@@ -60,7 +60,10 @@ validation. See [RPM build/dependency details](RPM.md).
 The release workflow builds **once on Ubuntu 24.04** and uploads one `.deb`. Seven
 compatibility jobs download that identical artifact and use Docker images:
 `ubuntu:20.04`, `ubuntu:22.04`, `ubuntu:24.04`, `ubuntu:26.04`, `debian:bullseye`,
-`debian:bookworm`, and `debian:trixie`.
+`debian:bookworm`, and `debian:trixie`. The Bullseye container uses Debian's
+signed archive for `bullseye-security`, whose packages have been removed from
+the live security mirror. This does not change users' APT sources or provide
+ongoing security updates for Bullseye.
 
 Each job resolves package dependencies through that distribution's repositories,
 installs the `.deb`, runs tests with stock Python, verifies the desktop entry and
