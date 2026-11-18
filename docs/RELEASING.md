@@ -9,11 +9,9 @@ is pushed. The workflow is `.github/workflows/release.yml`.
 2. Add a matching section to `docs/CHANGELOG.md`, for example:
 
    ```markdown
-   ## 1.0.0 — Initial public release
+   ## 1.0.1 — Project attribution
 
-   ### Features
-
-   - Guided setup and browser authentication.
+   - The About dialog now links to the GitHub project and credits the author.
    ```
 
    That section becomes the release's **Changes** description. Keep it specific
@@ -25,11 +23,11 @@ is pushed. The workflow is `.github/workflows/release.yml`.
 
    ```bash
    git push origin master
-   git tag -a v1.0.0 -m "Sync WebDAV Desktop 1.0.0"
-   git push origin v1.0.0
+   git tag -a v1.0.1 -m "Sync WebDAV Desktop 1.0.1"
+   git push origin v1.0.1
    ```
 
-Both `v1.0.0` and `1.0.0` formats are accepted. Choose one convention (preferably
+Both `v1.0.1` and `1.0.1` formats are accepted. Choose one convention (preferably
 `vMAJOR.MINOR.PATCH`) and use it consistently. The tag must exactly match both
 source version constants. Non-version tags and prerelease/build-suffix tags are
 rejected by validation; this workflow publishes stable MAJOR.MINOR.PATCH releases
@@ -105,7 +103,7 @@ View progress and errors in the repository's **Actions → Publish release** pag
 Local validation of the release notes is also available:
 
 ```bash
-/usr/bin/python3 packaging/release_notes.py --tag v1.0.0 --output dist/release-notes.md
+/usr/bin/python3 packaging/release_notes.py --tag v1.0.1 --output dist/release-notes.md
 /usr/bin/python3 -m unittest discover -s tests -v
 /usr/bin/python3 packaging/build.py
 /usr/bin/python3 packaging/check_distribution.py

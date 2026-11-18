@@ -28,16 +28,16 @@ class RPMPackagingTests(unittest.TestCase):
         ast.parse((ROOT / "packaging/build_rpm.py").read_text(), feature_version=8)
 
     def test_version_literals_and_optional_version(self):
-        self.assertEqual(rpm.installed_version(supplied="1.0.0"), "1.0.0")
         self.assertEqual(rpm.artifact_name("1.0.0"), "sync-webdav-desktop-1.0.0-1.noarch.rpm")
-        for version in ("v1.0.0", "1.0.0-1", "1.0.1", "01.0.0", "1.0.0\n%post", "../1.0.0"):
-            with self.subTest(version=version), self.assertRaises(ValueError):
-                rpm.installed_version(supplied=version)
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "install.py").write_text('raise RuntimeError("must not execute")\nVERSION = "1.0.0"\n')
             (root / "settings.py").write_text('raise RuntimeError("must not execute")\nVERSION = "1.0.0"\n')
             self.assertEqual(rpm.installed_version(root), "1.0.0")
+            self.assertEqual(rpm.installed_version(root, supplied="1.0.0"), "1.0.0")
+            for version in ("v1.0.0", "1.0.0-1", "1.0.1", "01.0.0", "1.0.0\n%post", "../1.0.0"):
+                with self.subTest(version=version), self.assertRaises(ValueError):
+                    rpm.installed_version(root, supplied=version)
             (root / "settings.py").write_text('VERSION = "2.0.0"\n')
             with self.assertRaisesRegex(ValueError, "settings.py"):
                 rpm.installed_version(root)
@@ -263,7 +263,7 @@ class RPMPackagingTests(unittest.TestCase):
     def test_cli_check_only_default_and_explicit_path(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
-            artifact = output / rpm.artifact_name("1.0.0")
+            artifact = output / rpm.artifact_name(rpm.installed_version())
             for arguments in (["--check-only", "--output-dir", str(output)],
                               ["--check-only", str(artifact)]):
                 with mock.patch.object(rpm, "check_artifact") as check, \

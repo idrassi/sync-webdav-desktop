@@ -135,6 +135,10 @@ def debian_files(source: dict[str, Member], epoch: int) -> tuple[dict[str, Membe
     files[f"{doc}/copyright"] = source["packaging/copyright"]
     files[f"{doc}/DISTRIBUTION.md"] = source["docs/DISTRIBUTION.md"]
     changelog = (f"{PACKAGE} ({VERSION}) unstable; urgency=medium\n\n"
+                 "  * Update project attribution in the About dialog and README.\n\n"
+                 " -- Mounir IDRASSI <mounir.idrassi@amcrypto.jp>  "
+                 "Wed, 18 Nov 2026 00:00:00 +0000\n\n"
+                 f"{PACKAGE} (1.0.0) unstable; urgency=medium\n\n"
                  "  * Initial public release of Sync WebDAV Desktop.\n\n"
                  " -- Mounir IDRASSI <mounir.idrassi@amcrypto.jp>  "
                  "Thu, 01 Jan 2026 00:00:00 +0000\n")

@@ -721,7 +721,9 @@ def run_gui() -> int:
             dialog = Gtk.AboutDialog(transient_for=self.window, modal=True, program_name=APP_NAME,
                                     version=VERSION, logo_icon_name=APP_ID,
                                     comments="Independent Linux setup and tray application for Sync.com WebDAV.\nNot affiliated with or endorsed by Sync.com.\nGenerated local passwords are stored in private Rclone configuration (obscured, not encrypted).\n\n" + AUTO_LOGOUT_HINT,
-                                    website="https://help.sync.com/hc/en-us/articles/51295382529043-WebDAV-Guide-for-Linux",
+                                    website="https://github.com/idrassi/sync-webdav-desktop",
+                                    authors=["Mounir IDRASSI"],
+                                    copyright="Copyright © 2026 Mounir IDRASSI — MIT License",
                                     license_type=Gtk.License.MIT_X11)
             dialog.run()
             dialog.destroy()

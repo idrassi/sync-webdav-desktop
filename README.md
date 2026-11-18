@@ -1,7 +1,7 @@
 # Sync WebDAV Desktop
 
 **Independent, unofficial Linux desktop application for Sync.com WebDAV.**
-Version 1.0.0 — initial public release. Not affiliated with or endorsed by Sync.com.
+Version 1.0.1. Not affiliated with or endorsed by Sync.com.
 
 [GitHub repository](https://github.com/idrassi/sync-webdav-desktop) ·
 [Report an issue](https://github.com/idrassi/sync-webdav-desktop/issues) ·
@@ -153,7 +153,7 @@ before attributing the recurring 76–91 minute disconnects to inactivity.
 
 ### Debian / Ubuntu / Mint / Zorin
 
-Distribute `dist/sync-webdav-desktop_1.0.0_all.deb`. Users can open it in their
+Distribute `dist/sync-webdav-desktop_1.0.1_all.deb`. Users can open it in their
 package installer, then launch **Sync WebDAV Desktop** from the application menu.
 The package installs system GTK/tray prerequisites; the GUI handles remaining
 runtime requirements and configuration after user approval.
@@ -161,17 +161,17 @@ runtime requirements and configuration after user approval.
 For terminal-based package installation:
 
 ```bash
-sudo apt install ./sync-webdav-desktop_1.0.0_all.deb
+sudo apt install ./sync-webdav-desktop_1.0.1_all.deb
 ```
 
 ### RPM / Fedora / RHEL-compatible / openSUSE
 
-Use `dist/sync-webdav-desktop-1.0.0-1.noarch.rpm`:
+Use `dist/sync-webdav-desktop-1.0.1-1.noarch.rpm`:
 
 ```bash
-sudo dnf install ./sync-webdav-desktop-1.0.0-1.noarch.rpm
+sudo dnf install ./sync-webdav-desktop-1.0.1-1.noarch.rpm
 # openSUSE:
-sudo zypper install ./sync-webdav-desktop-1.0.0-1.noarch.rpm
+sudo zypper install ./sync-webdav-desktop-1.0.1-1.noarch.rpm
 ```
 
 The RPM targets modern releases with **default Python 3.8+**, including Fedora,
@@ -184,7 +184,7 @@ their system interpreter. See [RPM distribution details](docs/RPM.md).
 
 ### Source distribution / other Linux distributions
 
-Extract `dist/sync-webdav-desktop-1.0.0.tar.gz`. If GTK/tray prerequisites are
+Extract `dist/sync-webdav-desktop-1.0.1.tar.gz`. If GTK/tray prerequisites are
 missing, run the confirmed bootstrap once, then install as the normal user:
 
 ```bash
@@ -318,7 +318,7 @@ Debian package is not a claim of validation on every Linux distribution.
 
 ## Automated releases
 
-Pushing a version tag such as `v1.0.0` runs GitHub Actions tests and packaging
+Pushing a version tag such as `v1.0.1` runs GitHub Actions tests and packaging
 verification, then publishes a GitHub release with the `.deb`, `.rpm`, source archive,
 checksums, and changes extracted from the matching `docs/CHANGELOG.md` entry.
 The tag must match `VERSION` in both `settings.py` and `install.py`. No personal
@@ -332,5 +332,9 @@ Implemented from the vendor's documented instructions:
 - https://help.sync.com/hc/en-us/articles/51295382529043-WebDAV-Guide-for-Linux
 - https://help.sync.com/hc/en-us/articles/56223914702483-Set-up-Sync-as-an-automatically-mounted-drive-on-Linux
 
-MIT license covers this application's code only. Sync trademarks and proprietary
+## License
+
+Copyright © 2026 Mounir IDRASSI — [MIT License](LICENSE).
+
+The MIT license covers this application's code only. Sync trademarks and proprietary
 server remain the property of their owners; users obtain that server from Sync.

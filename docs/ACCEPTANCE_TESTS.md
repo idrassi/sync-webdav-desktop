@@ -1,6 +1,6 @@
 # Release acceptance checklist
 
-Use this checklist to validate Sync WebDAV Desktop 1.0.0 on target environments.
+Use this checklist to validate Sync WebDAV Desktop 1.0.1 on target environments.
 Automated tests cover mocked setup and distribution checks; Ubuntu GNOME has
 monitoring/GUI validation. Run the following on disposable Linux VMs with a test
 Sync account. Do not use a production account or directories containing valuable

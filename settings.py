@@ -9,7 +9,7 @@ import re
 import shlex
 import tempfile
 
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 HOME = Path.home()
 APP_NAME = "Sync WebDAV Desktop"
 

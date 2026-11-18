@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.1 — Project attribution
+
+- The About dialog now links to the GitHub project, credits Mounir IDRASSI,
+  and displays the copyright and MIT license.
+- Added the copyright notice and author credit to the README.
+
 ## 1.0.0 — Initial public release
 
 ### Setup and connection management

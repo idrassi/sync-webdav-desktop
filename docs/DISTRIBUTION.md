@@ -1,4 +1,4 @@
-# Distributing Sync WebDAV Desktop 1.0.0
+# Distributing Sync WebDAV Desktop 1.0.1
 
 **Sync WebDAV Desktop is an independent, unofficial application.** It is not
 produced, affiliated with, or endorsed by Sync.com. The application and included
@@ -47,8 +47,8 @@ cd sync-webdav-desktop
 
 This uses only Python's standard library and creates:
 
-- `dist/sync-webdav-desktop-1.0.0.tar.gz`
-- `dist/sync-webdav-desktop_1.0.0_all.deb`
+- `dist/sync-webdav-desktop-1.0.1.tar.gz`
+- `dist/sync-webdav-desktop_1.0.1_all.deb`
 
 It runs no application code, imports no GI, downloads nothing, invokes no package
 manager, and makes no changes outside the output directory. It does not require
@@ -82,8 +82,8 @@ the archives. Changing included source files changes archive hashes.
 ## Source installation (per user, never sudo)
 
 ```sh
-tar -xzf sync-webdav-desktop-1.0.0.tar.gz
-cd sync-webdav-desktop-1.0.0
+tar -xzf sync-webdav-desktop-1.0.1.tar.gz
+cd sync-webdav-desktop-1.0.1
 /usr/bin/python3 scripts/bootstrap.py --check  # read-only prerequisite report
 /usr/bin/python3 scripts/bootstrap.py          # explicitly confirm any missing OS packages
 /usr/bin/python3 install.py                    # normal desktop user, no sudo
@@ -140,7 +140,7 @@ want the application to manage its service configuration.
 ## Debian installation and removal
 
 ```sh
-sudo apt install ./sync-webdav-desktop_1.0.0_all.deb
+sudo apt install ./sync-webdav-desktop_1.0.1_all.deb
 ```
 
 This is an explicit administrator action. Unlike `dpkg -i`, apt resolves the hard
@@ -178,14 +178,14 @@ are active or a drive service relies on the installed readiness helper.
 
 ## RPM installation and removal
 
-One `sync-webdav-desktop-1.0.0-1.noarch.rpm` uses dependency alternatives for Fedora,
+One `sync-webdav-desktop-1.0.1-1.noarch.rpm` uses dependency alternatives for Fedora,
 RHEL/CentOS-compatible and openSUSE package names. It installs the same application
 paths as the Debian package. Use DNF or Zypper to resolve its dependencies:
 
 ```sh
-sudo dnf install ./sync-webdav-desktop-1.0.0-1.noarch.rpm
+sudo dnf install ./sync-webdav-desktop-1.0.1-1.noarch.rpm
 # openSUSE:
-sudo zypper install ./sync-webdav-desktop-1.0.0-1.noarch.rpm
+sudo zypper install ./sync-webdav-desktop-1.0.1-1.noarch.rpm
 ```
 
 Modern default Python 3.8+ is required; RHEL/CentOS 7/8 and openSUSE Leap 15 are
@@ -238,8 +238,8 @@ For direct artifact inspection without installing:
 
 ```sh
 desktop-file-validate packaging/io.github.vera.SyncWebDAVTray.desktop
-dpkg-deb --info dist/sync-webdav-desktop_1.0.0_all.deb
-dpkg-deb --contents dist/sync-webdav-desktop_1.0.0_all.deb
-tar -tzf dist/sync-webdav-desktop-1.0.0.tar.gz
+dpkg-deb --info dist/sync-webdav-desktop_1.0.1_all.deb
+dpkg-deb --contents dist/sync-webdav-desktop_1.0.1_all.deb
+tar -tzf dist/sync-webdav-desktop-1.0.1.tar.gz
 sha256sum dist/*.tar.gz dist/*.deb
 ```

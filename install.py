@@ -15,7 +15,7 @@ import tempfile
 APP_ID = "io.github.vera.SyncWebDAVTray"
 APP_NAME = "Sync WebDAV Desktop"
 PACKAGE = "sync-webdav-desktop"
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 SOURCE = Path(__file__).resolve().parent
 MANIFEST = ".installation.json"
 PRIVATE_NAME = re.compile(r"(?:^|[_.-])(?:secrets?|credentials?|tokens?|passwords?|private)(?:[_.-]|$)", re.I)

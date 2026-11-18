@@ -1,6 +1,6 @@
-# Generic RPM (initial public release 1.0.0)
+# Generic RPM (1.0.1)
 
-The RPM asset is **`sync-webdav-desktop-1.0.0-1.noarch.rpm`**. There is one generic
+The RPM asset is **`sync-webdav-desktop-1.0.1-1.noarch.rpm`**. There is one generic
 binary RPM, without a Fedora, RHEL or SUSE release suffix. It contains the MIT-licensed
 Python desktop application, not Sync.com's proprietary WebDAV server. It is an
 independent, unofficial project, not affiliated with or endorsed by Sync.com.
@@ -11,7 +11,7 @@ From an extracted source release or checkout:
 
 ```bash
 python3 packaging/build_rpm.py
-python3 packaging/build_rpm.py --output-dir /tmp/rpm-output --version 1.0.0
+python3 packaging/build_rpm.py --output-dir /tmp/rpm-output --version 1.0.1
 ```
 
 Python 3.8+ and the `rpmbuild` and `rpm` tools (RPM 4.14+) are required for
@@ -34,7 +34,7 @@ are removed after completion, and only the binary RPM is copied to `dist/` (or
 
 ```bash
 python3 packaging/build_rpm.py --check-only
-python3 packaging/build_rpm.py --check-only /tmp/rpm-output/sync-webdav-desktop-1.0.0-1.noarch.rpm
+python3 packaging/build_rpm.py --check-only /tmp/rpm-output/sync-webdav-desktop-1.0.1-1.noarch.rpm
 python3 -m unittest discover -s tests -p test_rpm_packaging.py
 ```
 
@@ -85,8 +85,8 @@ Python 3.6 are explicitly unsupported: do not silently replace the system
 interpreter to force this RPM onto an older distribution.
 
 For an appropriately provisioned Fedora/RHEL system, installation is normally
-`sudo dnf install ./sync-webdav-desktop-1.0.0-1.noarch.rpm`; on SUSE use
-`sudo zypper install ./sync-webdav-desktop-1.0.0-1.noarch.rpm`. These are deliberate
+`sudo dnf install ./sync-webdav-desktop-1.0.1-1.noarch.rpm`; on SUSE use
+`sudo zypper install ./sync-webdav-desktop-1.0.1-1.noarch.rpm`. These are deliberate
 administrator actions, not commands run by the builder or checker. A noarch
 Python payload does not guarantee availability of the vendor WebDAV binary on
 all architectures. See `DISTRIBUTION.md` for per-user privileges and desktop

@@ -55,5 +55,8 @@ cp -a payload/. "%{buildroot}/"
 @FILES@
 
 %changelog
-* Thu Jan 01 2026 Mounir IDRASSI <mounir.idrassi@amcrypto.jp> - @VERSION@-1
+* Wed Nov 18 2026 Mounir IDRASSI <mounir.idrassi@amcrypto.jp> - @VERSION@-1
+- Update project attribution in the About dialog and README.
+
+* Thu Jan 01 2026 Mounir IDRASSI <mounir.idrassi@amcrypto.jp> - 1.0.0-1
 - Initial public release.
