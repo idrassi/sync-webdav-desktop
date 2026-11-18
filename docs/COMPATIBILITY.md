@@ -42,6 +42,19 @@ session, and a PolicyKit authentication agent for administrator actions. Ubuntu
 needs the enabled AppIndicators extension; other desktops need a status-notifier
 host. Package installation alone cannot verify those runtime conditions.
 
+## RPM-based distributions
+
+A single `sync-webdav-desktop-<version>-1.noarch.rpm` covers the same Python/image
+application with fixed dependency alternatives for Fedora/RHEL and openSUSE.
+Fedora 43/44, CentOS Stream 9/10 and openSUSE Leap 16/Tumbleweed are the RPM CI
+targets. Enterprise Linux needs suitable repositories (typically EPEL and
+CRB/CodeReady Builder); the app does not add repositories automatically.
+
+Default Python 3.8+ is required. RHEL/CentOS 7/8 and openSUSE Leap 15 system Python
+are below that baseline; no separate interpreter-specific RPM is provided.
+RPM availability is not a claim of real RHEL subscription or proprietary-server
+validation. See [RPM build/dependency details](RPM.md).
+
 ## CI validation
 
 The release workflow builds **once on Ubuntu 24.04** and uploads one `.deb`. Seven

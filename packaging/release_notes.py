@@ -76,13 +76,24 @@ Independent, unofficial Linux desktop application for Sync.com WebDAV.
   20.04/22.04/24.04/26.04 and Debian 11/12/13. `Architecture: all` contains the
   Python application; x86_64/ARM64 support also requires a compatible vendor
   WebDAV server. Container checks do not validate real cloud authentication.
+- **`sync-webdav-desktop-{version}-1.noarch.rpm`** — one RPM for modern Fedora,
+  RHEL/CentOS-compatible and openSUSE systems with default Python 3.8+ and GTK 3.16+.
+  Enterprise Linux may need administrator-enabled EPEL/CRB repositories.
 - **`sync-webdav-desktop-{version}.tar.gz`** — source distribution and per-user installer.
-- **`SHA256SUMS`** — SHA-256 checksums for both assets.
+- **`SHA256SUMS`** — SHA-256 checksums for all assets.
 
 Install the Debian package with:
 
 ```bash
 sudo apt install ./sync-webdav-desktop_{version}_all.deb
+```
+
+Install the RPM with your distribution's package manager (not `rpm --nodeps`):
+
+```bash
+sudo dnf install ./sync-webdav-desktop-{version}-1.noarch.rpm
+# openSUSE:
+sudo zypper install ./sync-webdav-desktop-{version}-1.noarch.rpm
 ```
 
 Or extract the source archive and follow the

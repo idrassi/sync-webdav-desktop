@@ -101,7 +101,8 @@ Package equivalents for manual prerequisite installation:
 | Distribution | GI/desktop prerequisites | System/authorization tools |
 | --- | --- | --- |
 | Debian/Ubuntu | `python3`, `python3-gi`, `gir1.2-gtk-3.0`, `gir1.2-ayatanaappindicator3-0.1` | `desktop-file-utils`, `systemd`, `util-linux`, `xdg-utils`, `pkexec` (or `policykit-1` on older releases) |
-| Fedora | `python3`, `python3-gobject`, `gtk3`, `libayatana-appindicator-gtk3` | `desktop-file-utils`, `systemd`, `util-linux`, `xdg-utils`, `polkit` |
+| Fedora / RHEL 9+ family | `python3`, `python3-gobject-base`, `gtk3`, `libayatana-appindicator-gtk3` | `desktop-file-utils`, `systemd`, `util-linux`, `xdg-utils`, `polkit`; EPEL/CRB may be required |
+| openSUSE Leap 16 / Tumbleweed | `python3` (virtual provider), `python3-gobject`, `typelib-1_0-Gtk-3_0`, `typelib-1_0-AyatanaAppIndicator3-0_1` | `desktop-file-utils`, `systemd`, `util-linux`, `xdg-utils`, `polkit` |
 | Arch | `python`, `python-gobject`, `gtk3`, `libayatana-appindicator` | `desktop-file-utils`, `systemd`, `util-linux`, `xdg-utils`, `polkit` |
 
 `install.py` **copies** runtime Python modules and icons into
@@ -174,6 +175,26 @@ entries; disable app autostart before removal (or remove only the matching
 `io.github.vera.SyncWebDAVTray.desktop` entry). Service cleanup or disabling the
 drive is a separate deliberate user action. Do not uninstall while file transfers
 are active or a drive service relies on the installed readiness helper.
+
+## RPM installation and removal
+
+One `sync-webdav-desktop-1.0.0-1.noarch.rpm` uses dependency alternatives for Fedora,
+RHEL/CentOS-compatible and openSUSE package names. It installs the same application
+paths as the Debian package. Use DNF or Zypper to resolve its dependencies:
+
+```sh
+sudo dnf install ./sync-webdav-desktop-1.0.0-1.noarch.rpm
+# openSUSE:
+sudo zypper install ./sync-webdav-desktop-1.0.0-1.noarch.rpm
+```
+
+Modern default Python 3.8+ is required; RHEL/CentOS 7/8 and openSUSE Leap 15 are
+not supported by this generic package. Enterprise Linux dependencies can require
+administrator-enabled EPEL/CRB; no application/RPM script adds repositories. Only
+cache refreshes run in package lifecycle scripts. Removing the RPM does not stop
+or delete user Sync services, profiles, credentials, mounts or cloud files.
+Remove/reconfigure automatic setup before uninstalling its readiness helper.
+See [RPM build and support details](RPM.md).
 
 ## Privilege boundaries and the vendor binary
 

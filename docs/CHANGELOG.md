@@ -36,5 +36,7 @@
 - Reproducible source/package builds, automated verification and a release CI
   matrix that installs the same `.deb` on Ubuntu 20.04/22.04/24.04/26.04 and
   Debian 11/12/13 before publishing.
+- One noarch RPM with Fedora/RHEL/openSUSE dependency alternatives and RPM
+  installation/GUI compatibility checks; DNF and Zypper runtime setup support.
 - MIT-licensed application; Sync's proprietary server is obtained from the vendor
   at setup time and is not redistributed.

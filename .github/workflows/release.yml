@@ -45,7 +45,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             python3 python3-gi gir1.2-gtk-3.0 gir1.2-ayatanaappindicator3-0.1 \
-            desktop-file-utils rclone fuse3 util-linux kmod pkexec
+            desktop-file-utils rclone fuse3 util-linux kmod pkexec rpm
 
       - name: Run unit tests
         run: /usr/bin/python3 -m unittest discover -s tests -v
@@ -62,6 +62,21 @@ jobs:
       - name: Verify distributions and desktop entries
         run: /usr/bin/python3 packaging/check_distribution.py
 
+      - name: Build one portable noarch RPM
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          mkdir -p dist/rpm-output
+          docker run --rm \
+            --volume "$GITHUB_WORKSPACE:/workspace:ro" \
+            --volume "$GITHUB_WORKSPACE/dist/rpm-output:/output" \
+            --env SOURCE_DATE_EPOCH \
+            fedora:43 sh -c \
+            'dnf -y install python3 rpm-build; mkdir -p /tmp/source; cp -a /workspace/. /tmp/source/; cd /tmp/source; python3 packaging/build_rpm.py --output-dir /output; chmod a+r /output/*.rpm'
+          cp "dist/rpm-output/sync-webdav-desktop-${RELEASE_VERSION}-1.noarch.rpm" dist/
+          /usr/bin/python3 packaging/build_rpm.py --check-only \
+            "dist/sync-webdav-desktop-${RELEASE_VERSION}-1.noarch.rpm"
+
       - name: Generate asset checksums
         env:
           RELEASE_VERSION: ${{ steps.release.outputs.version }}
@@ -69,7 +84,8 @@ jobs:
           cd dist
           sha256sum \
             "sync-webdav-desktop_${RELEASE_VERSION}_all.deb" \
-            "sync-webdav-desktop-${RELEASE_VERSION}.tar.gz" > SHA256SUMS
+            "sync-webdav-desktop-${RELEASE_VERSION}.tar.gz" \
+            "sync-webdav-desktop-${RELEASE_VERSION}-1.noarch.rpm" > SHA256SUMS
 
       - name: Preserve validated release assets
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -78,6 +94,7 @@ jobs:
           path: |
             dist/sync-webdav-desktop_${{ steps.release.outputs.version }}_all.deb
             dist/sync-webdav-desktop-${{ steps.release.outputs.version }}.tar.gz
+            dist/sync-webdav-desktop-${{ steps.release.outputs.version }}-1.noarch.rpm
             dist/SHA256SUMS
             dist/release-notes.md
           if-no-files-found: error
@@ -123,9 +140,47 @@ jobs:
             "$DISTRO_IMAGE" sh -c \
             'mkdir -p /tmp/source; cp -a /workspace/. /tmp/source/; cd /tmp/source; sh scripts/check_deb_compatibility.sh'
 
+  rpm-compatibility:
+    name: Test noarch RPM on ${{ matrix.image }}
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - fedora:43
+          - fedora:44
+          - quay.io/centos/centos:stream9
+          - quay.io/centos/centos:stream10
+          - opensuse/leap:16.0
+          - opensuse/tumbleweed
+    steps:
+      - name: Check out the tagged RPM tests
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Download the one RPM built by the build job
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-${{ needs.build.outputs.version }}
+          path: dist
+
+      - name: Install and test the RPM in a disposable container
+        env:
+          DISTRO_IMAGE: ${{ matrix.image }}
+        run: |
+          docker run --rm \
+            --volume "$GITHUB_WORKSPACE:/workspace:ro" \
+            --env PYTHONDONTWRITEBYTECODE=1 \
+            --env COMPATIBILITY_SOURCE_DIR=/tmp/source \
+            "$DISTRO_IMAGE" sh -c \
+            'mkdir -p /tmp/source; cp -a /workspace/. /tmp/source/; cd /tmp/source; sh scripts/check_rpm_compatibility.sh'
+
   publish:
     name: Publish GitHub release
-    needs: [build, compatibility]
+    needs: [build, compatibility, rpm-compatibility]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -177,4 +232,5 @@ jobs:
             --notes-file dist/release-notes.md \
             "dist/sync-webdav-desktop_${RELEASE_VERSION}_all.deb" \
             "dist/sync-webdav-desktop-${RELEASE_VERSION}.tar.gz" \
+            "dist/sync-webdav-desktop-${RELEASE_VERSION}-1.noarch.rpm" \
             dist/SHA256SUMS

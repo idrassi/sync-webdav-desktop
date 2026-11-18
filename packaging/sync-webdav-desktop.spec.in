@@ -1,0 +1,59 @@
+# Generic RPM: do not add a distribution suffix or build-host ABI dependencies.
+%global debug_package %{nil}
+%global _enable_debug_packages 0
+%global _build_id_links none
+# Payload is public Python/text/SVG only. Disable all vendor brp hooks, including
+# Python bytecompilation, shebang rewriting, strip/debug and documentation gzip.
+%global __os_install_post %{nil}
+%global _python_bytecompile_errors_terminate_build 0
+%global _binary_payload w9.gzdio
+%global _source_payload w9.gzdio
+%global _binary_filedigest_algorithm 8
+%global _source_filedigest_algorithm 8
+%global _rpmfilename %%{ARCH}/%%{NAME}-%%{VERSION}-%%{RELEASE}.%%{ARCH}.rpm
+%global _unpackaged_files_terminate_build 1
+%global use_source_date_epoch_as_buildtime 1
+%global clamp_mtime_to_source_date_epoch 1
+%global _source_date_epoch @EPOCH@
+
+Name: sync-webdav-desktop
+Version: @VERSION@
+Release: 1
+Summary: Independent, unofficial Sync.com WebDAV desktop companion
+License: MIT
+URL: https://github.com/idrassi/sync-webdav-desktop
+Source0: %{name}-%{version}.tar.gz
+BuildArch: noarch
+AutoReqProv: no
+@REQUIRES@
+@RECOMMENDS@
+
+%description
+GTK 3 and Ayatana AppIndicator desktop application for Sync.com WebDAV
+and an rclone-mounted drive. Uses per-user services and browser sign-in.
+The proprietary Sync WebDAV binary is not included. Optional runtime setup
+obtains the vendor installer separately, with explicit user approval.
+This project is not affiliated with or endorsed by Sync.com.
+
+%prep
+%setup -q
+
+%build
+# No compilation, dependency downloads, or proprietary tools.
+
+%install
+mkdir -p "%{buildroot}"
+cp -a payload/. "%{buildroot}/"
+
+%post
+@CACHE_SCRIPT@
+
+%postun
+@CACHE_SCRIPT@
+
+%files
+@FILES@
+
+%changelog
+* Thu Jan 01 2026 Mounir IDRASSI <mounir.idrassi@amcrypto.jp> - @VERSION@-1
+- Initial public release.

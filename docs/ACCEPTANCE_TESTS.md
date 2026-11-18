@@ -12,7 +12,10 @@ files for destructive cases.
 - Debian 11, 12, 13 amd64: the same `.deb`, PolicyKit agent and browser.
 - Legacy OS security support and vendor server compatibility are separate checks.
 - Container CI covers package/tests/GUI startup, not live FUSE/cloud authentication.
-- Fedora amd64: source bootstrap, GTK/AppIndicator packages, GNOME extension.
+- Fedora amd64: noarch RPM, GTK/AppIndicator packages, GNOME extension.
+- CentOS Stream 9/10 and RHEL 9+ desktops: noarch RPM, approved EPEL/CRB or
+  CodeReady Builder repositories; actual RHEL subscription testing is separate.
+- openSUSE Leap 16/Tumbleweed: the same RPM, Zypper resolution and tray host.
 - Arch amd64: source bootstrap and GUI requirements (full pacman system upgrade).
 - ARM64 systemd Linux: compatible vendor binary and FUSE support.
 - KDE/Xfce: GTK dependencies and a status-notifier/AppIndicator panel host.

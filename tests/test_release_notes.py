@@ -73,7 +73,8 @@ class ReleaseNotesTests(unittest.TestCase):
             version, body = release.release_notes("v1.0.0", root)
             self.assertEqual(version, "1.0.0")
             for value in ("Guided setup", "sync-webdav-desktop_1.0.0_all.deb",
-                          "sync-webdav-desktop-1.0.0.tar.gz", "SHA256SUMS", "sudo apt install",
+                          "sync-webdav-desktop-1.0.0.tar.gz", "sync-webdav-desktop-1.0.0-1.noarch.rpm",
+                          "sudo dnf install", "sudo zypper install", "SHA256SUMS", "sudo apt install",
                           "/blob/v1.0.0/README.md", "not affiliated"):
                 self.assertIn(value, body)
 

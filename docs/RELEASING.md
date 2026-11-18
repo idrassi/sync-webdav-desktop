@@ -47,7 +47,8 @@ The read-only build job:
 - Validates version metadata and extracts changelog-based release notes offline.
 - Installs distribution prerequisites on the disposable Ubuntu runner.
 - Runs all unit tests and offline packaging verification.
-- Builds using the tagged commit timestamp as `SOURCE_DATE_EPOCH`.
+- Builds source/Debian packages on Ubuntu 24.04 and one portable noarch RPM in
+  a disposable Fedora container, using the tagged commit as `SOURCE_DATE_EPOCH`.
 - Generates SHA-256 checksums and uploads validated files for the publishing job.
 
 The compatibility matrix installs the **same** built `.deb` in Ubuntu 20.04,
@@ -55,7 +56,9 @@ The compatibility matrix installs the **same** built `.deb` in Ubuntu 20.04,
 dependency resolution, runs unit tests with each stock Python, checks the installed
 desktop entry and Rclone flags, and starts the GUI in an isolated Xvfb/session bus.
 It neither installs the vendor server nor authenticates or mounts cloud files.
-All compatibility jobs must pass before publication. The build/publish runner
+A parallel RPM matrix installs one noarch RPM on Fedora 43/44, CentOS Stream
+9/10 (with EPEL/CRB in test containers only), openSUSE Leap 16 and Tumbleweed.
+All configured Debian and RPM compatibility jobs must pass before publication. The build/publish runner
 remains Ubuntu 24.04; it does not impose a compiled ABI on this source-only package.
 
 A separate job with `contents: write` downloads those files, checks that the
@@ -67,6 +70,7 @@ remote check cannot make verification and publication a single atomic operation.
 The release includes:
 
 - `sync-webdav-desktop_<version>_all.deb`
+- `sync-webdav-desktop-<version>-1.noarch.rpm`
 - `sync-webdav-desktop-<version>.tar.gz`
 - `SHA256SUMS`
 

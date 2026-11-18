@@ -61,7 +61,8 @@ setups are discovered read-only; changing them requires explicit adoption.
 - User systemd services; localhost-only WebDAV access (`--allow-from none`).
 - Sync Folder, Vault, scoped folder, mount location, profile and port options.
 - Distribution dependency installation via administrator authorization
-  (`pkexec`) for Debian/Ubuntu/Mint/Zorin, Fedora, and Arch-family systems.
+  (`pkexec`) for Debian/Ubuntu/Mint/Zorin, Fedora/RHEL-compatible, openSUSE,
+  and Arch-family systems.
 - FUSE preflight and optional module loading; no automatic chmod or broad process
   killing. A port collision is reported rather than stopping unrelated programs.
 - Private local configuration backups, setup rollback, cancelled subprocess
@@ -76,7 +77,8 @@ setups are discovered read-only; changing them requires explicit adoption.
 - Stale FUSE mount detection and stop → ownership check → normal unmount → start
   recovery. Busy orphaned mounts require a separate lazy-detach confirmation.
   No force unmount, sudo unmount, process killing, or automatic mount cleanup.
-- Source archive and Debian `Architecture: all` package; MIT-licensed application.
+- Source archive, Debian `Architecture: all` package and RPM `noarch` package;
+  MIT-licensed application.
   The proprietary Sync server is **not redistributed**; it is downloaded at setup
   using the official HTTPS installer, which verifies its binary checksum.
 
@@ -162,7 +164,25 @@ For terminal-based package installation:
 sudo apt install ./sync-webdav-desktop_1.0.0_all.deb
 ```
 
-### Source distribution / Fedora / Arch
+### RPM / Fedora / RHEL-compatible / openSUSE
+
+Use `dist/sync-webdav-desktop-1.0.0-1.noarch.rpm`:
+
+```bash
+sudo dnf install ./sync-webdav-desktop-1.0.0-1.noarch.rpm
+# openSUSE:
+sudo zypper install ./sync-webdav-desktop-1.0.0-1.noarch.rpm
+```
+
+The RPM targets modern releases with **default Python 3.8+**, including Fedora,
+RHEL/CentOS Stream 9/10-compatible systems and openSUSE Leap 16/Tumbleweed. RHEL
+family systems may require administrator-enabled EPEL and CRB/CodeReady Builder
+repositories for Ayatana and Rclone. The application does not enable extra
+repositories automatically. RHEL/CentOS 7/8 and openSUSE Leap 15 default Python
+versions are below the supported baseline; this universal RPM does not replace
+their system interpreter. See [RPM distribution details](docs/RPM.md).
+
+### Source distribution / other Linux distributions
 
 Extract `dist/sync-webdav-desktop-1.0.0.tar.gz`. If GTK/tray prerequisites are
 missing, run the confirmed bootstrap once, then install as the normal user:
@@ -299,7 +319,7 @@ Debian package is not a claim of validation on every Linux distribution.
 ## Automated releases
 
 Pushing a version tag such as `v1.0.0` runs GitHub Actions tests and packaging
-verification, then publishes a GitHub release with the `.deb`, source archive,
+verification, then publishes a GitHub release with the `.deb`, `.rpm`, source archive,
 checksums, and changes extracted from the matching `docs/CHANGELOG.md` entry.
 The tag must match `VERSION` in both `settings.py` and `install.py`. No personal
 access token is required. See [the release guide](docs/RELEASING.md) for the

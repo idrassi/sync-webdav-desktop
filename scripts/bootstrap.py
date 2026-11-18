@@ -30,6 +30,7 @@ GI_PACKAGES = {
     "apt-get": ["python3-gi", "gir1.2-gtk-3.0", "gir1.2-ayatanaappindicator3-0.1"],
     "dnf": ["python3-gobject", "gtk3", "libayatana-appindicator-gtk3"],
     "pacman": ["python-gobject", "gtk3", "libayatana-appindicator"],
+    'zypper': ['python3-gobject', 'typelib-1_0-Gtk-3_0', 'typelib-1_0-AyatanaAppIndicator3-0_1'],
 }
 TOOLS = {"systemctl": "systemd", "findmnt": "util-linux",
          "update-desktop-database": "desktop-file-utils", "xdg-open": "xdg-utils", "pkexec": "pkexec"}
@@ -60,7 +61,8 @@ def package_manager() -> str | None:
         pass
     for identifier in identifiers:
         manager = {"debian": "apt-get", "ubuntu": "apt-get", "linuxmint": "apt-get",
-                   "fedora": "dnf", "rhel": "dnf", "centos": "dnf",
+                   "fedora": "dnf", "rhel": "dnf", "centos": "dnf", 'rocky': 'dnf', 'almalinux': 'dnf', 'ol': 'dnf',
+                   'opensuse': 'zypper', 'opensuse-tumbleweed': 'zypper', 'opensuse-leap': 'zypper', 'suse': 'zypper', 'sles': 'zypper',
                    "arch": "pacman", "manjaro": "pacman"}.get(identifier)
         if manager and shutil.which(manager):
             return manager
@@ -100,7 +102,7 @@ def main(argv: list[str] | None = None) -> int:
             # Focal/Bullseye ship pkexec inside policykit-1; newer releases split it.
             package = authorization_package(manager)
         packages.append(package)
-    operation = [manager, "-S", "--needed"] if manager == "pacman" else [manager, "install"]
+    operation = [manager, "-S", "--needed"] if manager == "pacman" else [manager, '--non-interactive', 'install'] if manager == 'zypper' else [manager, "install"]
     command = ["sudo", *operation, *dict.fromkeys(packages)]
     print(f"Proposed administrator command:\n  {shlex.join(command)}")
     print("No Sync binary, authentication, profiles, user services, or cloud files are handled here.")

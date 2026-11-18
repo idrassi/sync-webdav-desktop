@@ -57,7 +57,7 @@ def source_files() -> dict[str, Member]:
     if (ROOT / "pyproject.toml").exists():
         paths.add(ROOT / "pyproject.toml")
     for pattern in ("docs/*.md", "packaging/*.py", "packaging/*.desktop",
-                    "packaging/*.in", "scripts/*.py", "scripts/*.sh", "tests/test_*.py"):
+                    "packaging/*.in", "packaging/*.spec.in", "scripts/*.py", "scripts/*.sh", "tests/test_*.py"):
         paths.update(path for path in ROOT.glob(pattern) if public_file(path))
     for name in ("control.in", "copyright", "postinst", "postrm", "sync-webdav-desktop"):
         paths.add(ROOT / "packaging" / name)

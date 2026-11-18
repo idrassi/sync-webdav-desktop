@@ -61,6 +61,10 @@ def distro_family(path: Path = Path("/etc/os-release")) -> str:
     identifiers = {values.get("ID", ""), *values.get("ID_LIKE", "").split()}
     if identifiers & {"ubuntu", "debian", "linuxmint", "zorin"}:
         return "debian"
+    if identifiers & {'opensuse', 'opensuse-tumbleweed', 'opensuse-leap', 'suse', 'sles'}:
+        return 'suse'
+    if identifiers & {'rhel', 'centos', 'rocky', 'almalinux', 'ol'}:
+        return 'rhel'
     if identifiers & {"fedora"}:
         return "fedora"
     if identifiers & {"arch", "manjaro"}:
@@ -72,12 +76,15 @@ def package_commands(family: str) -> list[list[str]]:
     if family == "debian":
         return [["/usr/bin/apt-get", "update"], ["/usr/bin/apt-get", "install", "-y",
                 "curl", "rclone", "fuse3", "util-linux", "kmod"]]
-    if family == "fedora":
+    if family in {'fedora', 'rhel'}:
         return [["/usr/bin/dnf", "install", "-y", "curl", "rclone", "fuse3", "util-linux", "kmod"]]
+    if family == 'suse':
+        return [['/usr/bin/zypper', '--non-interactive', 'install', '--no-recommends',
+                 'curl', 'rclone', 'fuse3', 'util-linux', 'kmod']]
     if family == "arch":
         return [["/usr/bin/pacman", "-Syu", "--needed", "--noconfirm",
                  "curl", "rclone", "fuse3", "util-linux", "kmod"]]
-    raise OperationError("Automatic dependency installation supports Ubuntu/Debian, Fedora and Arch. Install prerequisites with your distribution's package tools.")
+    raise OperationError("Automatic dependency installation supports Ubuntu/Debian, Fedora/RHEL, openSUSE and Arch. Install prerequisites with your distribution's package tools.")
 
 
 def preflight(settings: Settings) -> Preflight:
@@ -144,6 +151,8 @@ def preflight(settings: Settings) -> Preflight:
         warnings.append("Existing Sync services will be adopted only after confirmation; configuration backups are kept privately.")
     if distro_family() == "arch" and missing:
         warnings.append("Arch dependency installation performs a full system upgrade, as required by the documented pacman -Syu instructions.")
+    if distro_family() == 'rhel':
+        warnings.append('RHEL/CentOS-compatible systems may require administrator-enabled EPEL and CRB/CodeReady Builder for Ayatana/Rclone. This app never adds repositories automatically.')
     if settings.before_login:
         warnings.append("Pre-login startup enables user lingering. It may keep other user services running after logout.")
     warnings.append("This is an independent app. Setup downloads and executes Sync's official HTTPS installer; Sync supplies the proprietary server.")
