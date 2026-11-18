@@ -61,6 +61,15 @@ def atomic_write(path: Path, content: str | bytes, mode: int = 0o600) -> None:
         Path(temporary).unlink(missing_ok=True)
 
 
+def is_within(path: Path, parent: Path) -> bool:
+    """Lexical containment, available on Python 3.8; does not follow symlinks."""
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
 def safe_text(value: str, label: str) -> str:
     if not isinstance(value, str) or any(ord(c) < 32 or ord(c) == 127 for c in value):
         raise ValueError(f"{label} contains invalid control characters")
@@ -100,7 +109,7 @@ class Settings:
             raise ValueError("Mount location must not contain .. path components")
         if not path.is_absolute() or path == Path("/") or path == HOME:
             raise ValueError("Choose an absolute mount folder, not / or your home folder itself")
-        if not path.is_relative_to(HOME):
+        if not is_within(path, HOME):
             raise ValueError("For safety, choose a mount folder inside your home directory")
         # Reject symlink components, even if they point into HOME.
         probe = path
@@ -108,7 +117,7 @@ class Settings:
             if probe.is_symlink():
                 raise ValueError("Mount paths containing symbolic links are not supported")
             probe = probe.parent
-        if path == config_dir() or config_dir().is_relative_to(path) or path.is_relative_to(config_dir()):
+        if path == config_dir() or is_within(config_dir(), path) or is_within(path, config_dir()):
             raise ValueError("The mount cannot contain the application's settings directory")
         if any(part.startswith(".") for part in path.relative_to(HOME).parts):
             raise ValueError("Do not mount inside hidden application/configuration directories")
@@ -126,14 +135,14 @@ class Settings:
         safe_text(self.rclone_config, "Rclone configuration path")
         if ".." in self.config_file.parts:
             raise ValueError("Rclone configuration path must not contain ..")
-        if not self.config_file.is_absolute() or not self.config_file.is_relative_to(HOME):
+        if not self.config_file.is_absolute() or not is_within(self.config_file, HOME):
             raise ValueError("Rclone configuration must be inside your home directory")
-        if self.config_file == path or self.config_file.is_relative_to(path):
+        if self.config_file == path or is_within(self.config_file, path):
             raise ValueError("Rclone configuration must be outside the mounted folder")
         reserved = {settings_path(), unit_dir() / 'sync-webdav.service', unit_dir() / 'sync-rclone.service'}
-        if self.config_file in reserved or self.config_file.is_relative_to(unit_dir()):
+        if self.config_file in reserved or is_within(self.config_file, unit_dir()):
             raise ValueError("Rclone configuration must not overwrite settings or systemd service files")
-        if self.config_file.is_relative_to(config_dir() / 'credential-recovery') or self.config_file.is_relative_to(config_dir() / 'backups'):
+        if is_within(self.config_file, config_dir() / 'credential-recovery') or is_within(self.config_file, config_dir() / 'backups'):
             raise ValueError("Rclone configuration must not overwrite recovery records or backups")
         for name in ("start_services", "before_login", "tray_autostart", "bookmark", "managed", "configured", "keepalive_enabled"):
             if type(getattr(self, name)) is not bool:

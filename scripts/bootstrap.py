@@ -17,12 +17,14 @@ import sys
 
 PROBE = """
 import sys
-if sys.version_info < (3, 10):
-    raise SystemExit('Python 3.10 or newer is required')
+if sys.version_info < (3, 8):
+    raise SystemExit('Python 3.8 or newer is required')
 import gi
 gi.require_version('Gtk', '3.0')
 gi.require_version('AyatanaAppIndicator3', '0.1')
 from gi.repository import Gtk, AyatanaAppIndicator3
+if Gtk.get_minor_version() < 16:
+    raise SystemExit('GTK 3.16 or newer is required')
 """
 GI_PACKAGES = {
     "apt-get": ["python3-gi", "gir1.2-gtk-3.0", "gir1.2-ayatanaappindicator3-0.1"],
@@ -65,6 +67,13 @@ def package_manager() -> str | None:
     return next((name for name in GI_PACKAGES if shutil.which(name)), None)
 
 
+def authorization_package(manager: str) -> str:
+    if manager != 'apt-get':
+        return 'polkit'
+    candidate = subprocess.run(['apt-cache', 'show', 'pkexec'], capture_output=True, text=True)
+    return 'pkexec' if candidate.returncode == 0 and 'Package: pkexec' in candidate.stdout else 'policykit-1'
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="Report prerequisites only; never invoke sudo or change packages")
@@ -73,11 +82,11 @@ def main(argv: list[str] | None = None) -> int:
         parser.exit(1, "Sync WebDAV Desktop requires Linux, systemd, and a graphical desktop.\n")
     gi_missing, tools = missing_prerequisites()
     if not gi_missing and not tools:
-        print("System Python >=3.10, GTK 3, Ayatana AppIndicator, pkexec, and desktop/system tools are ready.")
+        print("System Python >=3.8, GTK 3, Ayatana AppIndicator, pkexec, and desktop/system tools are ready.")
         print("Next: /usr/bin/python3 install.py (run as your desktop user, without sudo).")
         return 0
     if gi_missing:
-        print("Missing: system Python >=3.10 and/or its GI, GTK 3, Ayatana AppIndicator typelibs.")
+        print("Missing: system Python >=3.8 and/or its GI, GTK 3, Ayatana AppIndicator typelibs.")
     if tools:
         print(f"Missing commands: {', '.join(tools)}")
     manager = package_manager()
@@ -85,8 +94,12 @@ def main(argv: list[str] | None = None) -> int:
         parser.exit(1, "No supported package manager found. Install prerequisites manually; see docs/DISTRIBUTION.md.\n")
     packages = (["python3" if manager != "pacman" else "python", *GI_PACKAGES[manager]]
                 if gi_missing else [])
-    packages.extend("polkit" if tool == "pkexec" and manager != "apt-get"
-                    else TOOLS[tool] for tool in tools)
+    for tool in tools:
+        package = TOOLS[tool]
+        if tool == 'pkexec':
+            # Focal/Bullseye ship pkexec inside policykit-1; newer releases split it.
+            package = authorization_package(manager)
+        packages.append(package)
     operation = [manager, "-S", "--needed"] if manager == "pacman" else [manager, "install"]
     command = ["sudo", *operation, *dict.fromkeys(packages)]
     print(f"Proposed administrator command:\n  {shlex.join(command)}")
@@ -116,7 +129,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     gi_missing, tools = missing_prerequisites()
     if gi_missing or tools:
-        parser.exit(1, "Some prerequisites remain missing (Python must be >=3.10). See docs/DISTRIBUTION.md.\n")
+        parser.exit(1, "Some prerequisites remain missing (Python must be >=3.8). See docs/DISTRIBUTION.md.\n")
     print("Prerequisites ready. Run /usr/bin/python3 install.py without sudo.")
     return 0
 

@@ -194,7 +194,7 @@ def main() -> int:
             check((first / name).read_bytes() == (second / name).read_bytes(), f"Non-reproducible {name}")
             print(f"PASS reproducible {name}: {hashlib.sha256((first / name).read_bytes()).hexdigest()}")
         source, members = tar_files((first / ARTIFACTS[0]).read_bytes())
-        names = {name.removeprefix(PREFIX + "/") for name in source}
+        names = {name[len(PREFIX) + 1:] for name in source}
         check(all(name.startswith(PREFIX + "/") for name in source), "Source archive is not portable/contained")
         check({"app.py", "backend.py", "recovery.py", "install.py", "scripts/bootstrap.py", "LICENSE",
                "docs/DISTRIBUTION.md", "packaging/build.py"} <= names, "Missing source release inputs")
@@ -230,7 +230,7 @@ def main() -> int:
         payload, payload_members = tar_files(ar["data.tar.gz"])
         control = controls["control"].decode()
         for text in ("Package: sync-webdav-desktop\n", f"Version: {VERSION}\n", "Architecture: all\n",
-                     "python3 (>= 3.10)", "gir1.2-ayatanaappindicator3-0.1", "util-linux, xdg-utils, pkexec\n"):
+                     "python3 (>= 3.8)", "gir1.2-ayatanaappindicator3-0.1", "util-linux, xdg-utils, pkexec | policykit-1\n"):
             check(text in control, f"Missing Debian metadata/dependency: {text}")
         runtime = {f"usr/share/{PACKAGE}/{name}" for name in names
                    if (len(Path(name).parts) == 1 and name.endswith(".py") and name != "install.py")
@@ -269,12 +269,14 @@ def main() -> int:
         spec.loader.exec_module(bootstrap)
         with mock.patch.object(bootstrap, "missing_prerequisites", return_value=(True, ["pkexec"])), \
                 mock.patch.object(bootstrap, "package_manager", return_value="apt-get"), \
+                mock.patch.object(bootstrap, "authorization_package", return_value="pkexec"), \
                 mock.patch.object(bootstrap.subprocess, "run") as forbidden, \
                 contextlib.redirect_stdout(io.StringIO()):
             check(bootstrap.main(["--check"]) == 1, "Bootstrap check should report missing prerequisites")
             forbidden.assert_not_called()
         with mock.patch.object(bootstrap, "missing_prerequisites", return_value=(True, ["pkexec"])), \
                 mock.patch.object(bootstrap, "package_manager", return_value="apt-get"), \
+                mock.patch.object(bootstrap, "authorization_package", return_value="pkexec"), \
                 mock.patch.object(bootstrap.os, "geteuid", return_value=1000), \
                 mock.patch.object(bootstrap.shutil, "which", return_value="/usr/bin/sudo"), \
                 mock.patch.object(bootstrap.sys.stdin, "isatty", return_value=True), \
@@ -285,6 +287,7 @@ def main() -> int:
             forbidden.assert_not_called()
         with mock.patch.object(bootstrap, "missing_prerequisites", side_effect=[(True, ["pkexec"]), (False, [])]), \
                 mock.patch.object(bootstrap, "package_manager", return_value="apt-get"), \
+                mock.patch.object(bootstrap, "authorization_package", return_value="pkexec"), \
                 mock.patch.object(bootstrap.os, "geteuid", return_value=1000), \
                 mock.patch.object(bootstrap.shutil, "which", return_value="/usr/bin/sudo"), \
                 mock.patch.object(bootstrap.sys.stdin, "isatty", return_value=True), \

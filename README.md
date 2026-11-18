@@ -175,7 +175,7 @@ missing, run the confirmed bootstrap once, then install as the normal user:
 
 The installer copies the app to stable per-user storage, so the extracted source
 folder can subsequently be moved or removed. Source installation requires Python
-3.10+, GTK 3, PyGObject and Ayatana AppIndicator system packages. See
+3.8+, GTK 3.16+, PyGObject and Ayatana AppIndicator system packages. See
 [distribution instructions](docs/DISTRIBUTION.md) for package details.
 
 Supported server architectures: **x86_64 / ARM64**. Requires systemd, a graphical
@@ -183,6 +183,26 @@ Linux desktop, a browser, network access, and administrator access when system
 requirements are missing. GNOME needs an AppIndicator extension; Ubuntu already
 provides one. The main window remains accessible if the desktop lacks a tray.
 KDE/Xfce support depends on their status-notifier host and installed GTK packages.
+
+### One package across Ubuntu and Debian
+
+One `Architecture: all` `.deb` covers the application on Ubuntu **20.04, 22.04,
+24.04 and 26.04**, and Debian **11 (Bullseye), 12 (Bookworm) and 13 (Trixie)**,
+subject to the validation and vendor limits below. No release-specific binary
+build is needed: the package contains Python source and images, not compiled
+application code or a bundled Python/GTK runtime.
+
+The minimum is stock Python **3.8** and GTK **3.16**. Ubuntu 18.04 and Debian 10
+are below the interpreter baseline and are not supported. Ubuntu 20.04 and Debian
+11 are legacy targets; use appropriate distribution security support rather than
+treating application compatibility as OS support.
+
+CI builds once on **Ubuntu 24.04**, then installs the **same package** in seven
+distribution containers and runs tests plus an isolated GTK smoke test before
+publishing. Container validation does not test real browser authentication, FUSE
+mounts, GNOME extensions or the separately downloaded proprietary Sync server.
+Sync supports x86_64/ARM64; compatibility with older host releases ultimately also
+depends on that vendor executable. See [compatibility details](docs/COMPATIBILITY.md).
 
 ## Existing setups
 

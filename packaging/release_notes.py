@@ -15,7 +15,7 @@ VERSION_PATTERN = r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
 def tag_version(tag: str) -> str:
     if not re.fullmatch(r"v?" + VERSION_PATTERN, tag):
         raise ValueError("Release tags must be vMAJOR.MINOR.PATCH or MAJOR.MINOR.PATCH, e.g. v1.0.0")
-    return tag.removeprefix("v")
+    return tag[1:] if tag.startswith("v") else tag
 
 
 def read_version(path: Path) -> str:
@@ -71,9 +71,11 @@ Independent, unofficial Linux desktop application for Sync.com WebDAV.
 
 ## Downloads and installation
 
-- **`sync-webdav-desktop_{version}_all.deb`** — Debian/Ubuntu-family package.
-  `Architecture: all` contains the Python application and supports x86_64/ARM64
-  where the distribution dependencies and vendor WebDAV server are available.
+- **`sync-webdav-desktop_{version}_all.deb`** — one Debian/Ubuntu-family package
+  with a Python 3.8+/GTK 3.16+ baseline. CI checks this same artifact on Ubuntu
+  20.04/22.04/24.04/26.04 and Debian 11/12/13. `Architecture: all` contains the
+  Python application; x86_64/ARM64 support also requires a compatible vendor
+  WebDAV server. Container checks do not validate real cloud authentication.
 - **`sync-webdav-desktop-{version}.tar.gz`** — source distribution and per-user installer.
 - **`SHA256SUMS`** — SHA-256 checksums for both assets.
 
@@ -85,7 +87,7 @@ sudo apt install ./sync-webdav-desktop_{version}_all.deb
 
 Or extract the source archive and follow the
 [installation instructions](https://github.com/{REPOSITORY}/blob/{tag}/README.md#install).
-Requires Linux, Python 3.10+, systemd, GTK/AppIndicator support, and browser sign-in.
+Requires Linux, Python 3.8+, systemd, GTK/AppIndicator support, and browser sign-in.
 See the [distribution guide](https://github.com/{REPOSITORY}/blob/{tag}/docs/DISTRIBUTION.md)
 for desktop requirements, privileges, and platform validation limitations.
 

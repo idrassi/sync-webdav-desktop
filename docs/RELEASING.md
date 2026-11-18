@@ -50,6 +50,14 @@ The read-only build job:
 - Builds using the tagged commit timestamp as `SOURCE_DATE_EPOCH`.
 - Generates SHA-256 checksums and uploads validated files for the publishing job.
 
+The compatibility matrix installs the **same** built `.deb` in Ubuntu 20.04,
+22.04, 24.04, 26.04 and Debian Bullseye, Bookworm, Trixie containers. It validates
+dependency resolution, runs unit tests with each stock Python, checks the installed
+desktop entry and Rclone flags, and starts the GUI in an isolated Xvfb/session bus.
+It neither installs the vendor server nor authenticates or mounts cloud files.
+All compatibility jobs must pass before publication. The build/publish runner
+remains Ubuntu 24.04; it does not impose a compiled ABI on this source-only package.
+
 A separate job with `contents: write` downloads those files, checks that the
 remote tag still resolves to the tested commit (including annotated tags), and
 publishes using GitHub CLI. No source scripts or checkout run in the write-enabled

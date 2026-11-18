@@ -20,7 +20,7 @@ class ReleaseNotesTests(unittest.TestCase):
 
     def test_version_tag_formats(self):
         for tag in ("v1.0.0", "1.0.0", "v2.10.3"):
-            self.assertEqual(release.tag_version(tag), tag.removeprefix("v"))
+            self.assertEqual(release.tag_version(tag), tag[1:] if tag.startswith("v") else tag)
         for tag in ("v1", "v1.0", "v01.0.0", "v1.0.0-rc1", "v1.0.0+build", "other",
                     "v1.0.0\nvalue=evil", "v1.0.0; command", "../v1.0.0"):
             with self.subTest(tag=tag), self.assertRaises(ValueError):

@@ -8,8 +8,10 @@ files for destructive cases.
 
 ## Target matrix
 
-- Ubuntu LTS amd64: `.deb`, GNOME/Wayland, AppIndicators enabled.
-- Debian amd64: `.deb`, systemd desktop with a PolicyKit agent and a browser.
+- Ubuntu 20.04, 22.04, 24.04, 26.04 amd64: one `.deb`, systemd desktop and tray host.
+- Debian 11, 12, 13 amd64: the same `.deb`, PolicyKit agent and browser.
+- Legacy OS security support and vendor server compatibility are separate checks.
+- Container CI covers package/tests/GUI startup, not live FUSE/cloud authentication.
 - Fedora amd64: source bootstrap, GTK/AppIndicator packages, GNOME extension.
 - Arch amd64: source bootstrap and GUI requirements (full pacman system upgrade).
 - ARM64 systemd Linux: compatible vendor binary and FUSE support.

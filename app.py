@@ -786,7 +786,10 @@ def run_gui() -> int:
                 self.indicator.set_status(Indicator.IndicatorStatus.PASSIVE)
             if hasattr(self, 'tray_icons'):
                 self.tray_icons.close()
-            self.pool.shutdown(wait=False, cancel_futures=True)
+            # Each active operation/read is cancelled above. Python 3.8 does
+            # not support shutdown(cancel_futures=...); queued tasks observe
+            # their cancellation events before any connection changes.
+            self.pool.shutdown(wait=False)
             Gtk.Application.do_shutdown(self)
 
     application = Application()

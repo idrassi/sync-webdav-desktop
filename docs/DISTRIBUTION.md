@@ -7,7 +7,7 @@ and do not imply ownership of its trademarks.
 
 ## Supported environment
 
-- Linux with **Python 3.10 or newer**, systemd user services, GTK 3, and Ayatana
+- Linux with **Python 3.8 or newer**, systemd user services, GTK 3.16+, and Ayatana
   AppIndicator introspection libraries. Use `/usr/bin/python3` (the distribution's
   Python), not a virtual environment without system GI bindings.
 - GNOME needs an enabled **AppIndicator/KStatusNotifierItem extension** (Ubuntu's
@@ -25,7 +25,8 @@ and do not imply ownership of its trademarks.
 
 The runtime setup may offer installation of missing `curl`, `rclone`, `fuse3`, or
 `kmod` through the distro's **apt/dnf/pacman using pkexec**, after user approval.
-`pkexec` is a required Debian dependency; those other tools are recommendations.
+`pkexec | policykit-1` is a required Debian dependency alternative; older releases
+provide pkexec through policykit-1. The other runtime tools are recommendations.
 PolicyKit asks for administrator authorization, **not a Sync account password**.
 Account sign-in uses the normal browser opened by Sync's CLI with private local
 output pipes; no terminal emulator or VTE package is required. Device-code /
@@ -92,14 +93,14 @@ The bootstrap prints the exact proposed package command and requires interactive
 confirmation before invoking **sudo**. It never silently refreshes package indexes
 or installs packages, never downloads Sync, and does not perform app/drive setup.
 Denying confirmation or using `--check` makes no package changes. A supported
-distro's repositories must provide Python >=3.10. The helper cannot make an old
+distro's repositories must provide Python >=3.8. The helper cannot make an old
 release supported merely by installing its old `python3` package.
 
 Package equivalents for manual prerequisite installation:
 
 | Distribution | GI/desktop prerequisites | System/authorization tools |
 | --- | --- | --- |
-| Debian/Ubuntu | `python3`, `python3-gi`, `gir1.2-gtk-3.0`, `gir1.2-ayatanaappindicator3-0.1` | `desktop-file-utils`, `systemd`, `util-linux`, `xdg-utils`, `pkexec` |
+| Debian/Ubuntu | `python3`, `python3-gi`, `gir1.2-gtk-3.0`, `gir1.2-ayatanaappindicator3-0.1` | `desktop-file-utils`, `systemd`, `util-linux`, `xdg-utils`, `pkexec` (or `policykit-1` on older releases) |
 | Fedora | `python3`, `python3-gobject`, `gtk3`, `libayatana-appindicator-gtk3` | `desktop-file-utils`, `systemd`, `util-linux`, `xdg-utils`, `polkit` |
 | Arch | `python`, `python-gobject`, `gtk3`, `libayatana-appindicator` | `desktop-file-utils`, `systemd`, `util-linux`, `xdg-utils`, `polkit` |
 
@@ -142,9 +143,9 @@ sudo apt install ./sync-webdav-desktop_1.0.0_all.deb
 ```
 
 This is an explicit administrator action. Unlike `dpkg -i`, apt resolves the hard
-dependencies: `python3 (>= 3.10)`, `python3-gi`, `gir1.2-gtk-3.0`,
+dependencies: `python3 (>= 3.8)`, `python3-gi`, `gir1.2-gtk-3.0 (>= 3.16)`,
 `gir1.2-ayatanaappindicator3-0.1`, `desktop-file-utils`, `systemd`, `util-linux`,
-`xdg-utils`, and `pkexec`. Recommendations are `curl`, `rclone`, `fuse3`, and `kmod`.
+`xdg-utils`, and `pkexec | policykit-1`. Recommendations are `curl`, `rclone`, `fuse3`, and `kmod`.
 
 The package installs under `/usr/share/sync-webdav-desktop`, with
 `/usr/bin/sync-webdav-desktop`, the same desktop ID and hicolor SVG icon, and

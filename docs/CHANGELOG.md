@@ -31,7 +31,10 @@
 
 ### Distribution
 
-- Per-user source installation and architecture-independent Debian packaging.
-- Reproducible source/package builds and automated verification.
+- Per-user source installation and one architecture-independent Debian package
+  with Python 3.8+/GTK 3.16+ baseline and older PolicyKit package-name support.
+- Reproducible source/package builds, automated verification and a release CI
+  matrix that installs the same `.deb` on Ubuntu 20.04/22.04/24.04/26.04 and
+  Debian 11/12/13 before publishing.
 - MIT-licensed application; Sync's proprietary server is obtained from the vendor
   at setup time and is not redistributed.
