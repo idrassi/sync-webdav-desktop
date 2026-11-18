@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import socket
 import subprocess
 import sys
 import tempfile
@@ -132,6 +133,30 @@ class BackendTests(unittest.TestCase):
                 snapshot = b.collect_snapshot()
                 self.assertEqual(snapshot.mounted, expected, source)
                 self.assertEqual(snapshot.state, "online" if expected else "offline", source)
+
+    def test_snapshot_distinguishes_probe_timeout_from_other_http_failures(self):
+        from settings import Settings
+        services = ("Id=sync-webdav.service\nActiveState=active\n\n"
+                    "Id=sync-rclone.service\nActiveState=active\n")
+
+        def run(args, **kwargs):
+            output = services if args[0] == b.SYSTEMCTL else "fuse.rclone sync-webdav:\n" if "findmnt" in args[0] else ""
+            return subprocess.CompletedProcess(args, 0, output, "")
+
+        for error, timed_out in [(socket.timeout(), True), (ConnectionRefusedError(), False)]:
+            with self.subTest(error=error), patch.object(b, "run_command", side_effect=run), \
+                 patch.object(b, "operation_busy", return_value=False), \
+                 patch("diagnostics.daemon_log_tail", return_value=""), \
+                 patch("activity_history.report", side_effect=ValueError), \
+                 patch("http.client.HTTPConnection") as http:
+                connection = http.return_value
+                connection.getresponse.side_effect = error
+                snapshot = b.collect_snapshot(Settings())
+                connection.close.assert_called_once()
+                self.assertEqual(snapshot.state, "offline")
+                self.assertIsNone(snapshot.http_status)
+                self.assertEqual(snapshot.as_dict()["http_timed_out"], timed_out)
+                self.assertEqual(snapshot.webdav_delayed, timed_out)
 
     def test_interrupted_login_child_is_stopped_before_unlock(self):
         with tempfile.TemporaryDirectory() as directory:

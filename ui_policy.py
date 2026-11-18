@@ -1,5 +1,54 @@
 """Compact tray presentation policy. Navigation never modifies the connection."""
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+
+
+WEBDAV_TIMEOUT_LIMIT = 3
+
+
+class WebDAVTimeoutGrace:
+    """Keep the last known connected state through isolated local probe timeouts."""
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.connected_mount = None
+        self.timeouts = 0
+
+    def update(self, snapshot, busy=False):
+        if busy or snapshot.recovery_busy:
+            self.reset()
+            return snapshot
+        mount = (snapshot.mount_point, snapshot.mount_type, snapshot.port,
+                 snapshot.webdav.invocation, snapshot.webdav.main_pid,
+                 snapshot.rclone.invocation, snapshot.rclone.main_pid)
+        if snapshot.state == 'online':
+            self.connected_mount = mount
+            self.timeouts = 0
+            return snapshot
+        if snapshot.state != 'offline' or not snapshot.webdav_delayed:
+            self.reset()
+            return snapshot
+        if mount == self.connected_mount:
+            self.timeouts += 1
+            if self.timeouts < WEBDAV_TIMEOUT_LIMIT:
+                return replace(snapshot, state='online', title='Sync drive is mounted — checking WebDAV',
+                               detail='The local server was slow to respond. Both services are running; '
+                                      'the app will check again before reporting a problem.')
+        self.reset()
+        return replace(snapshot, title='Sync WebDAV is not responding',
+                       detail='Both services are running and the drive is still mounted. '
+                              'Check diagnostics before restarting the services.')
+
+
+def connection_notice(previous_state, snapshot):
+    if snapshot.state == 'auth' and previous_state != 'auth':
+        return snapshot.title, snapshot.detail
+    if snapshot.state in {'offline', 'working'} and previous_state == 'online':
+        if snapshot.webdav_delayed:
+            return snapshot.title, snapshot.detail
+        return 'Sync drive disconnected', 'Open Sync WebDAV for status and recovery options.'
+    return None
 
 
 @dataclass(frozen=True)

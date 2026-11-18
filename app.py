@@ -11,7 +11,7 @@ import threading
 
 from dataclasses import replace
 from settings import APP_NAME, VERSION, Settings, load_settings, save_settings
-from ui_policy import tray_state, TRAY_ENTRY_KEYS, PAGES
+from ui_policy import tray_state, connection_notice, TRAY_ENTRY_KEYS, PAGES, WebDAVTimeoutGrace
 from keepalive import KeepAliveSchedule, ping
 from session_guidance import (AUTO_LOGOUT_HINT, AUTO_LOGOUT_HELP, KEEPALIVE_POLICY_NOTE,
                               SECURITY_URL)
@@ -30,6 +30,8 @@ def run_gui() -> int:
             super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE)
             self.pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="sync-monitor")
             self.snapshot: Snapshot | None = None
+            self.display_snapshot: Snapshot | None = None
+            self.timeout_grace = WebDAVTimeoutGrace()
             self.refreshing = False
             self.closing = False
             self.busy = ""
@@ -122,7 +124,8 @@ def run_gui() -> int:
             self.refresh()
 
         def connection_action(self, *_):
-            policy = tray_state(self.snapshot, bool(self.busy) or bool(self.snapshot and self.snapshot.recovery_busy),
+            snapshot = self.display_snapshot
+            policy = tray_state(snapshot, bool(self.busy) or bool(snapshot and snapshot.recovery_busy),
                                 bool(self.cancel_event) and self.cancel_enabled)
             if not policy.action_enabled:
                 return
@@ -340,6 +343,7 @@ def run_gui() -> int:
                 return False
             try:
                 self.snapshot = future.result()
+                self.display_snapshot = self.timeout_grace.update(self.snapshot, bool(self.busy))
                 expiry_key = (self.snapshot.session_issued_at, self.snapshot.webdav.active_exit_monotonic)
                 if (self.snapshot.auth_reason == 'expired' and self.snapshot.session_issued_at and not self.smoke
                         and self.observed_expiry != expiry_key and self.history_future is None):
@@ -365,7 +369,7 @@ def run_gui() -> int:
             return False
 
         def render(self, force_icon=False):
-            snapshot = self.snapshot
+            snapshot = self.display_snapshot
             if snapshot is None:
                 return
             busy = self.busy or ("Recovery is running in another window" if snapshot.recovery_busy else "")
@@ -392,7 +396,11 @@ def run_gui() -> int:
             self.security_link.set_visible(snapshot.auth_reason == 'expired' and not busy)
             self.fields["WebDAV service"].set_text(snapshot.webdav.description)
             self.fields["Rclone service"].set_text(snapshot.rclone.description)
-            response = f"HTTP {snapshot.http_status} — responding" if snapshot.http_status else f"Not responding on 127.0.0.1:{snapshot.port}"
+            if snapshot.http_status:
+                response = f"HTTP {snapshot.http_status} — responding"
+            else:
+                problem = 'Probe timed out' if snapshot.http_timed_out else 'Not responding'
+                response = f"{problem} on 127.0.0.1:{snapshot.port}"
             self.path_label.set_text(snapshot.mount_point)
             self.fields["Local server"].set_text(response)
             self.fields["Drive mount"].set_text(snapshot.mount_type + (" — STALE (Rclone stopped)" if snapshot.stale_mount else ""))
@@ -401,7 +409,10 @@ def run_gui() -> int:
                 auth_text += f" (latest retry: {snapshot.latest_auth_reason})"
             self.fields["Authentication"].set_text(auth_text)
             self.fields["Failure logging"].set_text("Private log enabled" if snapshot.failure_logging else "Not enabled (legacy daemon output is discarded)")
-            keepalive_text = self.keepalive_schedule.description(snapshot, bool(busy))
+            # Keep-alive requires an actual successful probe, not the tray's last known state.
+            keepalive_text = self.keepalive_schedule.description(self.snapshot, bool(busy))
+            if not busy and snapshot.webdav_delayed and self.settings.keepalive_enabled:
+                keepalive_text = 'Paused while checking WebDAV'
             self.fields['Keep-alive'].set_text(keepalive_text)
             self.overview_keepalive.set_text('Keep-alive: ' + keepalive_text)
             self.fields["Last checked"].set_text(snapshot.checked_at)
@@ -424,10 +435,9 @@ def run_gui() -> int:
             self.autostart_item.set_sensitive(not busy)
             self.cancel_button.set_visible(bool(self.cancel_event) and self.cancel_enabled)
             if not busy:
-                if snapshot.state == "auth" and self.previous_state != "auth":
-                    self.notify(snapshot.title, snapshot.detail)
-                elif snapshot.state == "offline" and self.previous_state == "online":
-                    self.notify("Sync drive disconnected", "Open Sync WebDAV for status and recovery options.")
+                notice = connection_notice(self.previous_state, snapshot)
+                if notice:
+                    self.notify(*notice)
                 self.previous_state = snapshot.state
 
         def tick(self):
@@ -554,7 +564,7 @@ def run_gui() -> int:
                                  restore(self.settings, cancel, progress, lazy), cancellable=True)
 
         def open_drive(self, *_):
-            if not self.snapshot or self.snapshot.state != "online" or self.busy:
+            if not self.display_snapshot or self.display_snapshot.state != "online" or self.busy:
                 self.set_message("The drive is not connected. Opening an unmounted folder could lead to saving files locally.")
                 return
             try:
@@ -578,6 +588,7 @@ def run_gui() -> int:
 
         def start_operation(self, title, function, cancellable=False, allow_lazy=False):
             self.pause_keepalive()
+            self.timeout_grace.reset()
             self.busy = title
             self.cancel_event = threading.Event()
             self.cancel_enabled = cancellable
@@ -746,20 +757,20 @@ def run_gui() -> int:
         def finish_smoke_test(self):
             # Rendering/navigation regression checks only: do not invoke any
             # setup, connection, auth, preferences-write or maintenance action.
-            original = self.snapshot
+            original = self.display_snapshot
             original_busy = self.busy
             presentation_ok = original is not None and getattr(self, 'smoke_first_navigation', False)
             if original:
                 for page in PAGES:
                     self.stack.set_visible_child_name(page)
                     presentation_ok = presentation_ok and self.stack.get_visible_child_name() == page
-                self.snapshot = replace(original, state='auth', configured=True, auth_reason='expired')
+                self.display_snapshot = replace(original, state='auth', configured=True, auth_reason='expired')
                 self.render()
                 presentation_ok = presentation_ok and self.connection_item.get_label() == 'Sign in & restore…'
                 self.busy = 'Testing presentation'
                 self.render()
                 presentation_ok = presentation_ok and not self.quit_item.get_sensitive() and not self.open_item.get_sensitive()
-                self.snapshot = original
+                self.display_snapshot = original
                 self.busy = original_busy
                 self.stack.set_visible_child_name('overview')
                 self.render()

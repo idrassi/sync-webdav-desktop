@@ -102,6 +102,11 @@ files for destructive cases.
   in the window, not nested into a long tray menu.
 - Connected: Open drive works and connection action is Disconnect. New setup:
   action is Connect to Sync. Expired: Sign in & restore remains prominent.
+- While both services stay active and the verified drive remains mounted, one or
+  two consecutive local WebDAV probe timeouts leave the tray connected without
+  a disconnect notification. Diagnostics still reports the timeout. A healthy
+  response resets the count; three consecutive timeouts show a WebDAV warning.
+- Stopped services, lost mounts, and sign-in failures bypass this timeout grace.
 - Busy: Open drive/Quit unavailable and Cancel appears only when supported.
 - Preferences opens its page; all four tabs can be navigated without changing
   settings, signing in, restarting or disconnecting.

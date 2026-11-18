@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import re
+import socket
 import subprocess
 import tempfile
 import time
@@ -159,6 +160,12 @@ class Snapshot:
     keepalive_failure_count: int = 0
     session_evidence: str = ''
     keepalive_history: str = ''
+    http_timed_out: bool = False
+
+    @property
+    def webdav_delayed(self) -> bool:
+        return (self.http_timed_out and self.mounted and self.webdav.running
+                and self.rclone.running and not self.auth_failure)
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -260,10 +267,13 @@ def collect_snapshot(settings=None) -> Snapshot:
         mounted, mount_type = False, "Unknown"
         errors.append(str(exc))
     http_status = None
+    http_timed_out = False
     connection = http.client.HTTPConnection("127.0.0.1", settings.port, timeout=2)
     try:
         connection.request("HEAD", "/")
         http_status = connection.getresponse().status
+    except (TimeoutError, socket.timeout):  # Distinct exception classes before Python 3.10.
+        http_timed_out = True
     except (OSError, http.client.HTTPException):
         pass
     finally:
@@ -315,7 +325,7 @@ def collect_snapshot(settings=None) -> Snapshot:
     snapshot = Snapshot(webdav, rclone, mounted, mount_type, http_status, auth,
                     state, title, detail, logs, time.strftime("%H:%M:%S"), operation_busy(),
                     settings.mount_point, settings.port, settings.configured, settings.managed,
-                    reason, latest_reason, stale, logging_enabled())
+                    reason, latest_reason, stale, logging_enabled(), http_timed_out=http_timed_out)
     from activity_history import report
     from dataclasses import replace
     try:
